@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>HardSub Reader</title>
+</head>
+<body>
+<h1>HardSub Reader</h1>
+<p>Reads hardcoded (burned-in) video subtitles aloud in real time. Works
+with any video source: streaming sites, media players, video calls, or
+recorded lectures, in any language the OCR engine supports, including
+right-to-left scripts such as Arabic.</p>
+
+<h2>Requirements</h2>
+<ul>
+<li>Windows 10 or 11 (Windows 11 strongly recommended: it provides the
+high-accuracy OneOCR engine).</li>
+<li>Python 3.10 or newer for your machine's architecture (x64 or ARM64),
+installed from python.org with "Add to PATH" checked.</li>
+<li>Python packages: <code>pip install pillow oneocr winocr</code></li>
+<li>On Windows 11, run the bundled <code>setup_oneocr.ps1</code> script
+once as administrator to copy the OneOCR engine files. Without this
+step the add-on still works using the legacy engine at reduced
+accuracy.</li>
+</ul>
+
+<h2>Usage</h2>
+<ul>
+<li><strong>NVDA+alt+s</strong>: toggle subtitle reading. A high beep
+confirms the OCR engine is ready.</li>
+<li><strong>NVDA+alt+shift+s</strong>: toggle whether a new subtitle
+interrupts the one being spoken.</li>
+<li>Keep the video window focused; the add-on scans the bottom portion
+of the foreground window.</li>
+</ul>
+<p>Both gestures can be reassigned in the NVDA Input Gestures dialog
+under the HardSub Reader category.</p>
+
+<h2>Settings</h2>
+<p>NVDA menu, Preferences, Settings, HardSub Reader:</p>
+<ul>
+<li><strong>Response speed</strong>: how quickly new subtitles are
+noticed. Faster settings use more CPU and battery.</li>
+<li><strong>Part of the video window to scan</strong>: subtitles usually
+sit at the bottom, so scanning only the bottom third is fastest and
+most reliable. Choose a larger area if a video shows text higher up.</li>
+<li><strong>Filtering of OCR misreads</strong>: the add-on can
+double-check each line across scans before speaking it, which prevents
+garbled text during subtitle fade animations at the cost of a small
+delay. Normal is recommended.</li>
+<li><strong>Do not repeat a line seen again within this many
+seconds</strong>: prevents the same subtitle being spoken twice when it
+flickers or stays on screen.</li>
+<li><strong>Stop reading the previous subtitle when a new one
+appears</strong>: keeps speech in sync with fast dialogue; turn it off
+if you prefer every line read to the end.</li>
+<li><strong>Subtitle language code</strong>: used only by the fallback
+engine on systems without OneOCR; the high-accuracy engine detects
+languages automatically.</li>
+<li><strong>Full path to python.exe</strong>: only needed if automatic
+detection fails.</li>
+</ul>
+<h2>Troubleshooting</h2>
+<ul>
+<li>A low beep means the OCR helper stopped; it restarts automatically.
+Repeated failures produce a spoken message and a diagnostic log in your
+temporary folder named hardSubReader_sidecar.log.</li>
+<li>If you hear a note about the legacy engine, run setup_oneocr.ps1 to
+enable the high-accuracy engine.</li>
+</ul>
+</body>
+</html>
