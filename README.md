@@ -1,69 +1,50 @@
 # HardSub Reader — NVDA add-on
 
-Reads hardcoded (burned-in) video subtitles aloud in real time using the
-high-accuracy Windows 11 OneOCR engine, with automatic fallback to legacy
-Windows OCR on Windows 10. Works with any video source and any script the
-engine supports, including right-to-left languages such as Arabic.
+Many videos have subtitles burned directly into the picture — foreign
+films, social media clips, older DVDs, lecture recordings. Screen readers
+normally can't access them at all. HardSub Reader fixes that: it reads
+these hardcoded subtitles aloud in real time while you watch.
 
-Works on both **x64 and ARM64** Windows: the OCR runs in your system
-Python, and the Snipping Tool ships engine binaries matching your machine.
+It works with any video source — streaming sites, media players, video
+calls — and in the languages supported by the OCR engine, including
+right-to-left scripts such as Arabic. Recognition is powered by the
+high-accuracy OneOCR engine built into Windows 11, with an automatic
+fallback engine on Windows 10. Everything runs locally on your computer:
+no internet connection is used and nothing is sent anywhere.
 
-## Install (users)
+## Installation
 
-1. Install Python 3.10+ for your architecture from python.org
-   (check "Add Python to PATH" during setup).
-2. In a command prompt: `pip install pillow oneocr winocr`
-3. Windows 11 only, for the high-accuracy engine: right-click
-   `setup_oneocr.ps1`, "Run with PowerShell" as administrator. (Skipping
-   this is fine — the add-on falls back to the legacy engine and tells
-   you so.)
-4. Install the `.nvda-addon` file from the Releases page and restart NVDA.
+1. Install Python 3.10 or newer from python.org (tick "Add Python to
+   PATH" during setup).
+2. Open a command prompt and run: `pip install pillow oneocr winocr`
+3. On Windows 11, right-click `setup_oneocr.ps1` from this repository and
+   choose "Run with PowerShell" as administrator. This one-time step
+   enables the high-accuracy engine. Skipping it is fine — the add-on
+   will use the fallback engine and tell you so.
+4. Download the `.nvda-addon` file from the
+   [Releases page](../../releases), open it to install, and restart NVDA.
 
-## Use
+## How to use
 
-- `NVDA+alt+s` — toggle subtitle reading (high beep = engine ready).
-- `NVDA+alt+shift+s` — toggle interrupt mode.
-- Settings: NVDA menu → Preferences → Settings → **HardSub Reader**.
+- **NVDA+alt+s** — start or stop subtitle reading. A high beep means the
+  engine is ready. Keep the video window focused.
+- **NVDA+alt+shift+s** — choose whether a new subtitle interrupts the one
+  currently being read.
+- Settings live under NVDA menu → Preferences → Settings → **HardSub
+  Reader**, and full documentation is bundled with the add-on's help.
 
-Full documentation is bundled with the add-on (NVDA menu → Tools →
-Add-on store → installed add-ons → HardSub Reader → help), and in
-`addon/doc/en/readme.html`.
+## About this project
 
-## Build (developers)
+This add-on was created through AI-assisted development ("vibe coding"):
+the author has no programming background and built it in collaboration
+with an AI assistant (Anthropic's Claude), directing the design and
+extensively testing every version in real-world use as a blind screen
+reader user. The code includes an automated test suite covering the
+subtitle-detection logic, and issue reports are very welcome.
 
-```
-python build_addon.py     # produces hardSubReader-<version>.nvda-addon
-python test_tracker.py    # runs the 13-scenario dedup test suite
-```
-
-The test suite imports the actual shipped sidecar module; run it before
-every release.
-
-## Architecture
-
-- `addon/globalPlugins/hardSubReader/` — NVDA-side plugin: gestures,
-  settings panel, watchdog, speech output.
-- `addon/sidecar/subtitle_ocr_server.py` — external helper run in the
-  system Python (NVDA's embedded 32-bit Python cannot load the OCR
-  DLLs): screen capture, OCR with engine fallback, and the
-  `SubtitleTracker` dedup core (fuzzy stability gate, repeat-suppression
-  window, word-level extension handling).
-- They communicate over JSON lines on stdout; the plugin restarts the
-  helper automatically if it dies, with a crash-loop limit and a
-  diagnostic log in `%TEMP%\hardSubReader_sidecar.log`.
-
-## Publishing checklist (NVDA Add-on Store)
-
-- [ ] Replace `copying.txt` with the full GPL v2 text (store requirement).
-- [ ] Fill in your real name/email in `addon/manifest.ini` (author) and
-      the repository URL.
-- [ ] Tag a GitHub release and attach the built `.nvda-addon` file.
-- [ ] Verify `lastTestedNVDAVersion` matches the NVDA version you tested.
-- [ ] Submit via https://github.com/nvaccess/addon-datastore (see its
-      README: you open a pull request adding metadata that points at your
-      release download URL).
+For developers: `python build_addon.py` builds the package and
+`python test_tracker.py` runs the test suite.
 
 ## License
 
-GNU General Public License v2 (required for NVDA add-ons). See
-`copying.txt`.
+GNU General Public License v2. See `copying.txt`.
