@@ -10,26 +10,33 @@ calls — and in the languages supported by the OCR engine, including
 right-to-left scripts such as Arabic. Recognition is powered by the
 high-accuracy OneOCR engine built into Windows 11, with an automatic
 fallback engine on Windows 10. Everything runs locally on your computer:
-no internet connection is used and nothing is sent anywhere.
+no internet connection is used and nothing is sent anywhere. The only
+file the add-on writes is a small troubleshooting log in your temporary
+folder, which never contains subtitle text or screen content.
 
 ## Installation
 
-1. Install Python 3.10 or newer from python.org (tick "Add Python to
-   PATH" during setup).
-2. Open a command prompt and run: `pip install pillow oneocr winocr`
-3. On Windows 11, right-click `setup_oneocr.ps1` from this repository and
-   choose "Run with PowerShell" as administrator. This one-time step
-   enables the high-accuracy engine. Skipping it is fine — the add-on
+1. Download the `.nvda-addon` file from the
+   [Releases page](../../releases), open it to install, and restart
+   NVDA. The OCR helper is bundled for both x64 and ARM64 Windows —
+   no other software needs to be installed.
+2. On Windows 11, for the high-accuracy engine: right-click
+   `setup_oneocr.ps1` from this repository and choose "Run with
+   PowerShell" as administrator (a one-time step that copies the engine
+   files from your own Snipping Tool). Skipping it is fine — the add-on
    will use the fallback engine and tell you so.
-4. Download the `.nvda-addon` file from the
-   [Releases page](../../releases), open it to install, and restart NVDA.
+
+Advanced: if the bundled helper is blocked on your system, the add-on
+falls back to running its helper script with system Python (3.10+ plus
+`pip install pillow`).
 
 ## How to use
 
-- **NVDA+alt+s** — start or stop subtitle reading. A high beep means the
-  engine is ready. Keep the video window focused.
-- **NVDA+alt+shift+s** — choose whether a new subtitle interrupts the one
-  currently being read.
+- **NVDA+alt+shift+s** — start or stop subtitle reading. A high beep
+  means the engine is ready. Keep the video window focused.
+- Interrupt behavior (whether a new subtitle cuts off the previous one)
+  is in the add-on settings, with an assignable keystroke in the Input
+  Gestures dialog.
 - Settings live under NVDA menu → Preferences → Settings → **HardSub
   Reader**, and full documentation is bundled with the add-on's help.
 
@@ -42,8 +49,10 @@ extensively testing every version in real-world use as a blind screen
 reader user. The code includes an automated test suite covering the
 subtitle-detection logic, and issue reports are very welcome.
 
-For developers: `python build_addon.py` builds the package and
-`python test_tracker.py` runs the test suite.
+For developers: `python build_addon.py` builds the package,
+`python test_tracker.py` runs the test suite, and the GitHub Actions
+workflow builds the self-contained helper executables for both
+architectures and assembles the complete release package.
 
 ## License
 

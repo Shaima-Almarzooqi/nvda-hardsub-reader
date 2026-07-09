@@ -11,19 +11,22 @@ with any video source: streaming sites, media players, video calls, or
 recorded lectures, in any language the OCR engine supports, including
 right-to-left scripts such as Arabic.</p>
 
-<h2>Requirements</h2>
+<h2>Requirements and installation</h2>
 <ul>
-<li>Windows 10 or 11 (Windows 11 strongly recommended: it provides the
-high-accuracy OneOCR engine).</li>
-<li>Python 3.10 or newer for your machine's architecture (x64 or ARM64),
-installed from python.org with "Add to PATH" checked.</li>
-<li>Python packages: <code>pip install pillow oneocr winocr</code></li>
-<li>On Windows 11, run the bundled <code>setup_oneocr.ps1</code> script
-once as administrator to copy the OneOCR engine files. Without this
-step the add-on still works using the legacy engine at reduced
-accuracy.</li>
+<li>Windows 10 or 11 on x64 or ARM64. Windows 11 is strongly recommended:
+it provides the high-accuracy OneOCR engine.</li>
+<li>Install the add-on from the .nvda-addon file and restart NVDA. The
+OCR helper program is included; nothing else needs to be installed.</li>
+<li>Windows 11, one-time step for the high-accuracy engine: run the
+<code>setup_oneocr.ps1</code> script from the project page as
+administrator. It copies the engine files from your own Snipping Tool.
+If you skip this, the add-on uses a lower-accuracy fallback engine and
+tells you so.</li>
 </ul>
-
+<p>Advanced: if the bundled helper cannot run on your system (for
+example, blocked by security policy), the add-on automatically falls
+back to running its helper script with a system Python installation
+(Python 3.10 or newer plus <code>pip install pillow</code>).</p>
 <h2>Usage</h2>
 <ul>
 <li><strong>NVDA+alt+s</strong>: toggle subtitle reading. A high beep
@@ -57,14 +60,20 @@ if you prefer every line read to the end.</li>
 <li><strong>Subtitle language code</strong>: used only by the fallback
 engine on systems without OneOCR; the high-accuracy engine detects
 languages automatically.</li>
-<li><strong>Full path to python.exe</strong>: only needed if automatic
-detection fails.</li>
+<li><strong>Full path to python.exe</strong>: advanced, for the fallback
+mode only. The add-on normally uses its bundled helper program, so this
+can stay empty.</li>
 </ul>
 <h2>Troubleshooting</h2>
 <ul>
 <li>A low beep means the OCR helper stopped; it restarts automatically.
-Repeated failures produce a spoken message and a diagnostic log in your
-temporary folder named hardSubReader_sidecar.log.</li>
+Repeated failures produce a spoken message.</li>
+<li>The add-on keeps one diagnostic file on your computer:
+hardSubReader_sidecar.log in your temporary folder. It records only
+timestamps and technical error details for troubleshooting; it never
+contains subtitle text, screenshots, or anything about what you
+watched. It is capped at about one megabyte and can be safely deleted
+at any time.</li>
 <li>If you hear a note about the legacy engine, run setup_oneocr.ps1 to
 enable the high-accuracy engine.</li>
 </ul>

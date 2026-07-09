@@ -5,8 +5,9 @@
 # external sidecar process.
 #
 # Gestures (reassignable via NVDA Input Gestures dialog):
-#   NVDA+alt+s        toggle subtitle reading on/off
-#   NVDA+alt+shift+s  toggle whether new subtitles interrupt speech
+#   NVDA+alt+shift+s  toggle subtitle reading on/off
+#   (unassigned)      toggle whether new subtitles interrupt speech
+#                     (bindable via Input Gestures, HardSub Reader category)
 #
 # Settings: NVDA menu -> Preferences -> Settings -> HardSub Reader
 
@@ -38,8 +39,24 @@ except Exception:
     pass
 
 ADDON_DIR = os.path.dirname(__file__)
-SIDECAR = os.path.normpath(
-    os.path.join(ADDON_DIR, "..", "..", "sidecar", "subtitle_ocr_server.py"))
+SIDECAR_DIR = os.path.normpath(
+    os.path.join(ADDON_DIR, "..", "..", "sidecar"))
+SIDECAR = os.path.join(SIDECAR_DIR, "subtitle_ocr_server.py")
+
+
+def _machineArch():
+    """The real OS architecture, seen from NVDA's 32-bit process."""
+    arch = (os.environ.get("PROCESSOR_ARCHITEW6432")
+            or os.environ.get("PROCESSOR_ARCHITECTURE") or "")
+    return arch.upper()
+
+
+def findBundledHelper():
+    """Self-contained helper exe matching this machine, if shipped."""
+    name = ("hardsub_helper_arm64.exe" if "ARM64" in _machineArch()
+            else "hardsub_helper_x64.exe")
+    exe = os.path.join(SIDECAR_DIR, name)
+    return [exe] if os.path.isfile(exe) else None
 LOG_PATH = os.path.join(tempfile.gettempdir(), "hardSubReader_sidecar.log")
 
 CREATE_NO_WINDOW = 0x08000000
@@ -171,8 +188,9 @@ class HardSubReaderSettingsPanel(SettingsPanel):
 
         # Translators: label for the Python path field.
         self.pythonCtrl = helper.addLabeledControl(
-            _("Full path to python.exe, only needed if the add-on cannot "
-              "find Python by itself:"),
+            _("Advanced: full path to python.exe for the fallback helper. "
+              "Normally the add-on uses its bundled helper program and "
+              "this can stay empty:"),
             wx.TextCtrl)
         self.pythonCtrl.SetValue(getConf("pythonPath"))
 
@@ -212,7 +230,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         # Translators: describes the toggle subtitle reading command.
         description=_("Toggles reading of hardcoded video subtitles on "
                       "and off"),
-        gesture="kb:NVDA+alt+s",
+        gesture="kb:NVDA+alt+shift+s",
     )
     def script_toggleHardSubReader(self, gesture):
         with self._lock:
@@ -232,9 +250,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
     @script(
         # Translators: describes the toggle interrupt mode command.
+        # Unassigned by default to avoid gesture conflicts; users can
+        # bind it from the Input Gestures dialog, HardSub Reader category.
         description=_("Toggles whether a new subtitle interrupts the "
                       "previous one"),
-        gesture="kb:NVDA+alt+shift+s",
     )
     def script_toggleInterruptMode(self, gesture):
         newVal = not getConf("interrupt")
@@ -267,19 +286,33 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         ]
 
     def _startProc(self):
-        python = findSystemPython()
-        if not python:
+        # Prefer the self-contained helper executable bundled with the
+        # add-on (no Python required). Fall back to the script in the
+        # user's system Python if no exe is present for this machine.
+        command = findBundledHelper()
+        if command is None:
+            python = findSystemPython()
+            if python is not None:
+                command = python + ["-u", SIDECAR]
+        if command is None:
             # Translators: error when no system Python is found.
+            # Translators: error when no way to run the OCR helper exists.
             ui.message(_(
-                "System Python not found. Install Python from python.org, "
-                "or set its full path in the HardSub Reader settings "
-                "panel."))
-            return False
-        if not os.path.isfile(SIDECAR):
-            # Translators: error when the helper script is missing.
-            ui.message(_("Sidecar script missing from the add-on."))
+                "The OCR helper could not be started: no bundled helper "
+                "for this machine and no system Python found. Install "
+                "Python from python.org, or set its full path in the "
+                "HardSub Reader settings panel."))
             return False
         try:
+            # Keep the diagnostic log from growing forever: if it has
+            # passed 1 MB, start it fresh. It only ever contains
+            # timestamps and error details -- never subtitle text or
+            # screen content.
+            try:
+                if os.path.getsize(LOG_PATH) > 1_000_000:
+                    os.remove(LOG_PATH)
+            except OSError:
+                pass
             logFile = open(LOG_PATH, "a", encoding="utf-8", errors="replace")
         except Exception:
             logFile = subprocess.DEVNULL
@@ -288,7 +321,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         env["PYTHONIOENCODING"] = "utf-8:replace"
         try:
             proc = subprocess.Popen(
-                python + ["-u", SIDECAR] + self._sidecarArgs(),
+                command + self._sidecarArgs(),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=logFile,

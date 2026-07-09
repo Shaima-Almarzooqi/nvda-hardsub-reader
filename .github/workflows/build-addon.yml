@@ -1,0 +1,95 @@
+name: Build add-on with self-contained helpers
+
+# Builds the OCR helper as a standalone executable for both x64 and ARM64
+# Windows, then packages the complete .nvda-addon containing both, so end
+# users need no Python installation.
+#
+# Runs on every push of a version tag (v1.0.1 etc.) and can also be
+# started manually from the Actions tab ("Run workflow").
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build-helpers:
+    strategy:
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install pillow pyinstaller
+          # Legacy-engine fallback is best-effort; wheels may not exist
+          # for every runner architecture.
+          pip install winocr; if ($LASTEXITCODE -ne 0) { Write-Host "winocr unavailable; exe will use OneOCR only"; $global:LASTEXITCODE = 0 }
+
+      - name: Build helper executable
+        shell: pwsh
+        working-directory: addon/sidecar
+        run: |
+          $collect = ""
+          pip show winocr > $null 2>&1
+          if ($LASTEXITCODE -eq 0) { $collect = "--collect-all winocr" } else { $global:LASTEXITCODE = 0 }
+          $cmd = "pyinstaller --onefile --console --name hardsub_helper_${{ matrix.arch }} $collect subtitle_ocr_server.py"
+          Invoke-Expression $cmd
+
+      - name: Smoke test (helper starts and reports)
+        shell: pwsh
+        working-directory: addon/sidecar
+        run: |
+          # The helper should start, then exit when stdin closes. It will
+          # report an engine error on the runner (no OneOCR files there),
+          # which proves the executable itself runs.
+          $p = Start-Process -FilePath "dist/hardsub_helper_${{ matrix.arch }}.exe" -RedirectStandardOutput out.txt -RedirectStandardError err.txt -PassThru -NoNewWindow
+          Start-Sleep -Seconds 15
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          Get-Content out.txt
+          if ((Get-Content out.txt -Raw) -notmatch '"type"') { throw "helper produced no protocol output" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: helper-${{ matrix.arch }}
+          path: addon/sidecar/dist/hardsub_helper_${{ matrix.arch }}.exe
+
+  package-addon:
+    needs: build-helpers
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Collect helper executables into the add-on
+        uses: actions/download-artifact@v4
+        with:
+          pattern: helper-*
+          merge-multiple: true
+          path: addon/sidecar/
+
+      - name: Run test suite and build package
+        run: |
+          python test_tracker.py
+          python build_addon.py
+          dir *.nvda-addon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nvda-addon-package
+          path: "*.nvda-addon"
