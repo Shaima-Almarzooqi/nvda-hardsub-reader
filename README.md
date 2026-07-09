@@ -19,12 +19,13 @@ folder, which never contains subtitle text or screen content.
 1. Download the `.nvda-addon` file from the
    [Releases page](../../releases), open it to install, and restart
    NVDA.
-2. On Windows 11, the first time you start subtitle reading the add-on
-   offers to set up the high-accuracy OneOCR engine — answer Yes and
-   approve the administrator prompt (a one-time step that copies the
-   engine files from your own Snipping Tool). Declining is fine — the
-   add-on will use the fallback engine and tell you so. The same setup
-   can be run manually via `setup_oneocr.ps1` in this repository.
+2. On Windows 11, after installing and restarting NVDA, the add-on
+   offers once to set up the high-accuracy OneOCR engine — answer Yes
+   and approve the administrator prompt (a one-time step that copies the
+   engine files from your own Snipping Tool). You can also start it any
+   time from the "Set up the high-accuracy OneOCR engine now" button in
+   the add-on settings. Declining is fine — the add-on uses the fallback
+   engine automatically.
 
 Advanced: if the bundled helper is blocked on your system, the add-on
 falls back to running its helper script with system Python (3.10+ plus

@@ -118,7 +118,7 @@ config.conf.spec[CONF_SECTION] = {
     "interrupt": "boolean(default=True)",
     "ocrLanguage": "string(default='en')",
     "preferredHelper": "string(default='')",
-    "engineSetupDeclined": "boolean(default=False)",
+    "engineSetupOffered": "boolean(default=False)",
 }
 
 ENGINE_DIR = os.path.join(os.path.expanduser("~"), ".config", "oneocr")
@@ -265,6 +265,29 @@ class HardSubReaderSettingsPanel(SettingsPanel):
             wx.TextCtrl)
         self.langCtrl.SetValue(getConf("ocrLanguage"))
 
+        # Translators: button that sets up the high-accuracy OneOCR engine.
+        self.setupBtn = wx.Button(self, label=_(
+            "Set up the high-accuracy OneOCR engine now..."))
+        self.setupBtn.Bind(wx.EVT_BUTTON, self.onSetupEngine)
+        helper.addItem(self.setupBtn)
+        if engineFilesPresent():
+            self.setupBtn.Disable()
+            # Translators: shown when the engine is already set up.
+            helper.addItem(wx.StaticText(self, label=_(
+                "The high-accuracy engine is already set up.")))
+
+
+    def onSetupEngine(self, event):
+        if not snippingToolPresent():
+            gui.messageBox(
+                # Translators: shown when Snipping Tool is not available.
+                _("The Windows 11 Snipping Tool, which provides the OneOCR "
+                  "engine files, was not found on this system. The "
+                  "add-on will continue using the fallback engine."),
+                _("HardSub Reader"), wx.OK | wx.ICON_INFORMATION)
+            return
+        if _plugin is not None:
+            _plugin._runEngineSetup()
 
     def onSave(self):
         c = config.conf[CONF_SECTION]
@@ -302,6 +325,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         self._settled = False
         gui.settingsDialogs.NVDASettingsDialog.categoryClasses.append(
             HardSubReaderSettingsPanel)
+        # Offer engine setup shortly after startup, once the NVDA GUI is
+        # ready (not during plugin construction).
+        try:
+            wx.CallLater(4000, self._offerEngineSetupAtStartup)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     @script(
@@ -318,8 +347,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                 # Translators: announced when subtitle reading stops.
                 ui.message(_("Subtitle reading off"))
             else:
-                if self._maybeOfferEngineSetup():
-                    return
                 self._enabled = True
                 self._restartTimes = []
                 self._commands = buildHelperCandidates()
@@ -350,42 +377,48 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             ui.message(_("Subtitles queue without interrupting"))
 
     # ------------------------------------------------------------------
-    def _maybeOfferEngineSetup(self):
-        """On machines missing the OneOCR engine files, offer (once) to
-        copy them from the user's Snipping Tool via an elevated script.
-        Returns True if setup was launched and the toggle should wait."""
-        if engineFilesPresent() or getConf("engineSetupDeclined"):
-            return False
-        if not os.path.isfile(SETUP_SCRIPT) or not snippingToolPresent():
-            # Not a Windows 11 machine with Snipping Tool: nothing to
-            # offer; the legacy engine will be used automatically.
-            return False
-        # Translators: dialog offering to set up the high-accuracy engine.
-        result = gui.messageBox(
-            _("HardSub Reader can use the high-accuracy OneOCR engine, "
-              "but its files have not been set up yet. Set them up now? "
-              "This copies files from your own Snipping Tool and shows "
-              "an administrator prompt. If you choose No, the add-on "
-              "will use a lower-accuracy engine and will not ask again."),
-            # Translators: title of the engine setup dialog.
-            _("Set up high-accuracy engine?"),
-            wx.YES_NO | wx.ICON_QUESTION)
-        if result != wx.YES:
-            config.conf[CONF_SECTION]["engineSetupDeclined"] = True
-            return False
+    def _offerEngineSetupAtStartup(self):
+        """Once, shortly after NVDA starts, offer to set up the OneOCR
+        engine on Windows 11 machines that don't yet have it. Decoupled
+        from subtitle reading entirely: the administrator prompt happens
+        here, calmly, not while the user is trying to watch something."""
+        try:
+            if getConf("engineSetupOffered") or engineFilesPresent():
+                return
+            if not os.path.isfile(SETUP_SCRIPT) or not snippingToolPresent():
+                return
+            # Mark as offered first, so a crash or dismissed dialog never
+            # causes the prompt to reappear on every startup.
+            config.conf[CONF_SECTION]["engineSetupOffered"] = True
+            # Translators: dialog offering to set up the high-accuracy engine.
+            result = gui.messageBox(
+                _("HardSub Reader can read subtitles more accurately using "
+                  "the OneOCR engine built into Windows 11. Setting it up "
+                  "is a one-time step that copies files from your own "
+                  "Snipping Tool and needs administrator approval. Set it "
+                  "up now? You can also do this later from the HardSub "
+                  "Reader settings."),
+                # Translators: title of the engine setup dialog.
+                _("HardSub Reader: set up high-accuracy engine?"),
+                wx.YES_NO | wx.ICON_QUESTION)
+            if result == wx.YES:
+                self._runEngineSetup()
+        except Exception:
+            pass
+
+    def _runEngineSetup(self):
+        """Launch the bundled setup script elevated and inform the user."""
         if launchEngineSetup():
             # Translators: spoken after the elevated setup is launched.
             ui.message(_(
-                "Engine setup is running in an administrator window. "
-                "When it reports it is done, press the subtitle reading "
-                "toggle again."))
+                "Engine setup is running in an administrator window. When "
+                "it finishes, restart subtitle reading to use the "
+                "high-accuracy engine."))
         else:
-            # Translators: spoken if the administrator prompt was refused.
+            # Translators: spoken if the administrator prompt was declined.
             ui.message(_(
-                "Setup was cancelled. Subtitle reading will use the "
-                "lower-accuracy engine; you can run setup_oneocr.ps1 "
-                "manually later."))
-        return True
+                "Engine setup did not start. You can try again from the "
+                "HardSub Reader settings at any time."))
 
     # ------------------------------------------------------------------
     def applySettings(self):
