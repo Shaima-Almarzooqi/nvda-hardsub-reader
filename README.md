@@ -27,10 +27,6 @@ folder, which never contains subtitle text or screen content.
    the add-on settings. Declining is fine — the add-on uses the fallback
    engine automatically.
 
-Advanced: if the bundled helper is blocked on your system, the add-on
-falls back to running its helper script with system Python (3.10+ plus
-`pip install pillow`).
-
 ## How to use
 
 - **NVDA+alt+shift+s** — start or stop subtitle reading. A high beep

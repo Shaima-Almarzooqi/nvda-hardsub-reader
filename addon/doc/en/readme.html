@@ -24,10 +24,6 @@ time with the "Set up the high-accuracy OneOCR engine now" button in the
 add-on settings. If the engine is not set up, the add-on uses a
 lower-accuracy fallback engine automatically.</li>
 </ul>
-<p>Advanced: if the bundled helper cannot run on your system, the
-add-on automatically falls back to running its helper script with a
-system Python installation (Python 3.10 or newer plus
-<code>pip install pillow</code>).</p>
 <h2>Usage</h2>
 <ul>
 <li><strong>NVDA+alt+shift+s</strong>: toggle subtitle reading. A high
@@ -74,8 +70,9 @@ timestamps and technical error details for troubleshooting; it never
 contains subtitle text, screenshots, or anything about what you
 watched. It is capped at about one megabyte and can be safely deleted
 at any time.</li>
-<li>If you hear a note about the legacy engine, run setup_oneocr.ps1 to
-enable the high-accuracy engine.</li>
+<li>If you hear a note about the lower-accuracy engine, open the HardSub
+Reader settings and use the "Set up the high-accuracy OneOCR engine now"
+button.</li>
 </ul>
 </body>
 </html>
