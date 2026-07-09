@@ -28,6 +28,8 @@ The process exits when its stdin is closed.
 import difflib
 import faulthandler
 import json
+import os
+import platform
 import sys
 import threading
 import time
@@ -234,6 +236,17 @@ class SubtitleTracker:
 # ---------------------------------------------------------------------------
 
 
+def _pe_machine(path):
+    """Read a PE file's machine type: 0x8664 = x64, 0xaa64 = ARM64."""
+    try:
+        with open(path, "rb") as f:
+            data = f.read(4096)
+        off = int.from_bytes(data[0x3C:0x40], "little")
+        return hex(int.from_bytes(data[off + 4:off + 6], "little"))
+    except Exception:
+        return "unreadable"
+
+
 def load_engine():
     """Try OneOCR first, then legacy Windows OCR. Returns
     (recognize_fn(img) -> str, engine_display_name) or raises."""
@@ -254,8 +267,13 @@ def load_engine():
 
         return rec_oneocr, "OneOCR"
     except Exception:
+        dll = os.path.join(os.path.expanduser("~"),
+                           ".config", "oneocr", "oneocr.dll")
         log("OneOCR unavailable, trying legacy Windows OCR:\n"
-            + traceback.format_exc())
+            + traceback.format_exc()
+            + f"diagnostic: this process machine={platform.machine()}, "
+              f"oneocr.dll machine={_pe_machine(dll)} "
+              "(0x8664=x64, 0xaa64=ARM64; these must match)")
 
     # 2) Legacy Windows OCR: lower accuracy, works on Windows 10, no setup
     import winocr
@@ -405,6 +423,8 @@ def main():
         sys.exit(1)
 
     emit({"type": "ready", "engine": engine_name})
+    log(f"runtime: frozen={getattr(sys, 'frozen', False)} "
+        f"machine={platform.machine()} exe={sys.executable}")
     log(f"Engine ready ({engine_name}); interval={POLL_INTERVAL}s "
         f"region={int(REGION_FRACTION*100)}% stable={STABLE_FRAMES} "
         f"window={REPEAT_WINDOW}s")

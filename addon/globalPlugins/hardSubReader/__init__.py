@@ -47,10 +47,17 @@ SIDECAR = os.path.join(SIDECAR_DIR, "subtitle_ocr_server.py")
 def _machineArch():
     """The real OS architecture, seen from NVDA's 32-bit process.
 
-    Environment variables are unreliable under emulation (a 32-bit
-    process on ARM64 Windows can be told the machine is AMD64), so ask
-    Windows directly via IsWow64Process2, which reports the true native
-    machine. Falls back to environment variables on very old systems."""
+    Environment variables and even some APIs are unreliable under
+    emulation (a process on ARM64 Windows can be told the machine is
+    AMD64). The filesystem cannot lie: ARM64 Windows has a
+    Windows/SysArm64 directory and x64 Windows does not, so check that
+    first, then IsWow64Process2, then environment variables."""
+    try:
+        windir = os.environ.get("SystemRoot", r"C:\Windows")
+        if os.path.isdir(os.path.join(windir, "SysArm64")):
+            return "ARM64"
+    except Exception:
+        pass
     try:
         import ctypes
         k32 = ctypes.windll.kernel32
@@ -69,12 +76,24 @@ def _machineArch():
     return arch.upper()
 
 
-def findBundledHelper():
-    """Self-contained helper exe matching this machine, if shipped."""
-    name = ("hardsub_helper_arm64.exe" if "ARM64" in _machineArch()
-            else "hardsub_helper_x64.exe")
-    exe = os.path.join(SIDECAR_DIR, name)
-    return [exe] if os.path.isfile(exe) else None
+def buildHelperCandidates():
+    """All ways to run the OCR helper, best first: the bundled exe for
+    the detected machine, then the other bundled exe (in case detection
+    was deceived by emulation), then the system-Python fallback. The
+    plugin tries them in order until one achieves the OneOCR engine."""
+    preferArm = "ARM64" in _machineArch()
+    names = ["hardsub_helper_arm64.exe", "hardsub_helper_x64.exe"]
+    if not preferArm:
+        names.reverse()
+    candidates = []
+    for n in names:
+        exe = os.path.join(SIDECAR_DIR, n)
+        if os.path.isfile(exe):
+            candidates.append([exe])
+    python = findSystemPython()
+    if python is not None and os.path.isfile(SIDECAR):
+        candidates.append(python + ["-u", SIDECAR])
+    return candidates
 LOG_PATH = os.path.join(tempfile.gettempdir(), "hardSubReader_sidecar.log")
 
 CREATE_NO_WINDOW = 0x08000000
@@ -228,6 +247,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         self._enabled = False
         self._restartTimes = []
         self._lock = threading.Lock()
+        # Engine escalation state: candidates are tried in order until
+        # one reports the OneOCR engine; the first that at least starts
+        # (legacy engine) is remembered as the fallback.
+        self._commands = []
+        self._commandIndex = 0
+        self._legacyIndex = None
+        self._settled = False
         gui.settingsDialogs.NVDASettingsDialog.categoryClasses.append(
             HardSubReaderSettingsPanel)
 
@@ -248,6 +274,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             else:
                 self._enabled = True
                 self._restartTimes = []
+                self._commands = buildHelperCandidates()
+                self._commandIndex = 0
+                self._legacyIndex = None
+                self._settled = False
                 if self._startProc():
                     # Translators: announced when subtitle reading starts.
                     ui.message(_("Subtitle reading starting"))
@@ -292,15 +322,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         ]
 
     def _startProc(self):
-        # Prefer the self-contained helper executable bundled with the
-        # add-on (no Python required). Fall back to the script in the
-        # user's system Python if no exe is present for this machine.
-        command = findBundledHelper()
-        if command is None:
-            python = findSystemPython()
-            if python is not None:
-                command = python + ["-u", SIDECAR]
-        if command is None:
+        if not self._commands:
+            self._commands = buildHelperCandidates()
+            self._commandIndex = 0
+        if self._commandIndex >= len(self._commands):
             # Translators: error when no system Python is found.
             # Translators: error when no way to run the OCR helper exists.
             ui.message(_(
@@ -324,21 +349,43 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         env = os.environ.copy()
         env["PYTHONUTF8"] = "1"
         env["PYTHONIOENCODING"] = "utf-8:replace"
-        try:
-            proc = subprocess.Popen(
-                command + self._sidecarArgs(),
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=logFile,
-                creationflags=CREATE_NO_WINDOW,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-            )
-        except Exception as e:
+        proc = None
+        while self._commandIndex < len(self._commands):
+            command = self._commands[self._commandIndex]
+            try:
+                logFile.write("launching helper: %s\n" % command[0])
+                logFile.flush()
+            except Exception:
+                pass
+            try:
+                proc = subprocess.Popen(
+                    command + self._sidecarArgs(),
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=logFile,
+                    creationflags=CREATE_NO_WINDOW,
+                    encoding="utf-8",
+                    errors="replace",
+                    env=env,
+                )
+                break
+            except Exception:
+                # This candidate cannot even start (e.g. an exe built for
+                # a different CPU). Move on to the next one.
+                proc = None
+                self._commandIndex += 1
+        if proc is None:
+            # All candidates failed to launch; if one earlier reached the
+            # legacy engine, settle for it rather than giving up.
+            if self._legacyIndex is not None and not self._settled:
+                self._settled = True
+                self._commandIndex = self._legacyIndex
+                return self._startProc()
             # Translators: error when the helper process cannot start.
-            ui.message(_("Could not start OCR helper: {error}").format(
-                error=e))
+            ui.message(_(
+                "The OCR helper could not be started. Reinstall the "
+                "add-on, or install Python from python.org to use the "
+                "fallback mode."))
             return False
         self._proc = proc
         threading.Thread(
@@ -375,10 +422,25 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                     if text:
                         self._speakSubtitle(text, msg.get("kind", "line"))
                 elif mtype == "ready":
+                    engine = msg.get("engine", "")
+                    isLegacy = "legacy" in engine.lower()
+                    with self._lock:
+                        if (isLegacy and not self._settled
+                                and self._commandIndex + 1 < len(
+                                    self._commands)):
+                            # This helper runs but without OneOCR. Another
+                            # candidate might do better (e.g. the exe for
+                            # the other CPU architecture): remember this
+                            # one as a fallback and try the next.
+                            if self._legacyIndex is None:
+                                self._legacyIndex = self._commandIndex
+                            self._commandIndex += 1
+                            self._stopProc()  # watchdog starts the next
+                            continue
+                        self._settled = True
                     queueHandler.queueFunction(
                         queueHandler.eventQueue, tones.beep, 880, 60)
-                    engine = msg.get("engine", "")
-                    if "legacy" in engine.lower():
+                    if isLegacy:
                         # Translators: warns that the fallback engine is
                         # in use, with reduced accuracy.
                         self._speak(_(
@@ -417,6 +479,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             with self._lock:
                 if not self._enabled or self._proc is not None:
                     return
+                if (self._commandIndex >= len(self._commands)
+                        and self._legacyIndex is not None
+                        and not self._settled):
+                    # Ran out of better candidates: settle for the one
+                    # that at least started with the legacy engine.
+                    self._settled = True
+                    self._commandIndex = self._legacyIndex
                 if not self._startProc():
                     self._enabled = False
             queueHandler.queueFunction(
