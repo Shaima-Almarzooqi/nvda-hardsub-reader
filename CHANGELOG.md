@@ -1,10 +1,9 @@
 # Changelog
 
 ## 1.0.1
-- The OCR helper now ships as a self-contained executable for both x64
-  and ARM64 Windows: installing Python is no longer required. A system
-  Python (with Pillow) is used automatically as a fallback if the
-  bundled helper cannot run.
+- The OCR helper now ships as a self-contained program: installing
+  Python is no longer required. A system Python (with Pillow) is used
+  automatically as a fallback if the bundled helper cannot run.
 - The OneOCR wrapper module (MIT licensed) is bundled inside the
   add-on; `pip install oneocr` is no longer required.
 - Fixed a keystroke conflict with NVDA's built-in sound split toggle
@@ -19,8 +18,7 @@
   OCR language, Python path).
 - Automatic engine fallback: OneOCR (Windows 11) with legacy Windows OCR
   (Windows 10) as fallback, announced at startup.
-- Bundled setup_oneocr.ps1 for one-step OneOCR engine setup on x64 and
-  ARM64.
+- Bundled setup_oneocr.ps1 for one-step OneOCR engine setup.
 - Input gestures categorized and reassignable; translator comments added
   throughout for localization.
 

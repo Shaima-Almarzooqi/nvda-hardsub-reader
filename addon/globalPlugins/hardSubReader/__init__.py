@@ -85,6 +85,13 @@ def buildHelperCandidates():
     names = ["hardsub_helper_arm64.exe", "hardsub_helper_x64.exe"]
     if not preferArm:
         names.reverse()
+    # A helper that previously achieved the OneOCR engine on this machine
+    # is remembered and tried first, so the candidate walk (and its couple
+    # of seconds of startup cost) only ever happens once.
+    remembered = getConf("preferredHelper")
+    if remembered in names:
+        names.remove(remembered)
+        names.insert(0, remembered)
     candidates = []
     for n in names:
         exe = os.path.join(SIDECAR_DIR, n)
@@ -110,6 +117,7 @@ config.conf.spec[CONF_SECTION] = {
     "repeatWindow": "integer(default=8, min=2, max=60)",
     "interrupt": "boolean(default=True)",
     "ocrLanguage": "string(default='en')",
+    "preferredHelper": "string(default='')",
 }
 
 # Module-level reference so the settings panel can apply changes live.
@@ -438,6 +446,16 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                             self._stopProc()  # watchdog starts the next
                             continue
                         self._settled = True
+                        if not isLegacy:
+                            # Remember the winning helper for next time.
+                            try:
+                                name = os.path.basename(
+                                    self._commands[self._commandIndex][0])
+                                if name.endswith(".exe"):
+                                    config.conf[CONF_SECTION][
+                                        "preferredHelper"] = name
+                            except Exception:
+                                pass
                     queueHandler.queueFunction(
                         queueHandler.eventQueue, tones.beep, 880, 60)
                     if isLegacy:

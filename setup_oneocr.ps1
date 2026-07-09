@@ -1,7 +1,7 @@
 # HardSub Reader: OneOCR engine setup
 # Copies the OneOCR engine files from the Windows 11 Snipping Tool into
-# the folder where the oneocr Python package expects them. Works on both
-# x64 and ARM64 (the Snipping Tool ships matching binaries per machine).
+# the folder where the add-on expects them. The Snipping Tool ships
+# engine binaries matching your machine, so no configuration is needed.
 # Run as administrator:  powershell -ExecutionPolicy Bypass -File setup_oneocr.ps1
 
 $ErrorActionPreference = "Stop"
