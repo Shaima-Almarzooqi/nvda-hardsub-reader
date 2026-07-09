@@ -118,10 +118,48 @@ config.conf.spec[CONF_SECTION] = {
     "interrupt": "boolean(default=True)",
     "ocrLanguage": "string(default='en')",
     "preferredHelper": "string(default='')",
+    "engineSetupDeclined": "boolean(default=False)",
 }
+
+ENGINE_DIR = os.path.join(os.path.expanduser("~"), ".config", "oneocr")
+ENGINE_FILES = ("oneocr.dll", "oneocr.onemodel", "onnxruntime.dll")
+SETUP_SCRIPT = os.path.join(SIDECAR_DIR, "setup_oneocr.ps1")
 
 # Module-level reference so the settings panel can apply changes live.
 _plugin = None
+
+
+def engineFilesPresent():
+    return all(os.path.isfile(os.path.join(ENGINE_DIR, f))
+               for f in ENGINE_FILES)
+
+
+def snippingToolPresent():
+    """True if the Windows 11 Snipping Tool (the OneOCR source) is
+    installed. Quick non-elevated PowerShell query."""
+    try:
+        out = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-Command",
+             "(Get-AppxPackage Microsoft.ScreenSketch).InstallLocation"],
+            capture_output=True, text=True, timeout=15,
+            creationflags=CREATE_NO_WINDOW)
+        return bool(out.stdout.strip())
+    except Exception:
+        return False
+
+
+def launchEngineSetup():
+    """Run the bundled setup script elevated (UAC prompt). Returns True
+    if the elevated process was launched."""
+    try:
+        import ctypes
+        ret = ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", "powershell.exe",
+            '-NoProfile -ExecutionPolicy Bypass -File "%s"' % SETUP_SCRIPT,
+            None, 1)
+        return ret > 32
+    except Exception:
+        return False
 
 
 def getConf(key):
@@ -280,6 +318,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                 # Translators: announced when subtitle reading stops.
                 ui.message(_("Subtitle reading off"))
             else:
+                if self._maybeOfferEngineSetup():
+                    return
                 self._enabled = True
                 self._restartTimes = []
                 self._commands = buildHelperCandidates()
@@ -308,6 +348,44 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         else:
             # Translators: announced when interrupt mode is disabled.
             ui.message(_("Subtitles queue without interrupting"))
+
+    # ------------------------------------------------------------------
+    def _maybeOfferEngineSetup(self):
+        """On machines missing the OneOCR engine files, offer (once) to
+        copy them from the user's Snipping Tool via an elevated script.
+        Returns True if setup was launched and the toggle should wait."""
+        if engineFilesPresent() or getConf("engineSetupDeclined"):
+            return False
+        if not os.path.isfile(SETUP_SCRIPT) or not snippingToolPresent():
+            # Not a Windows 11 machine with Snipping Tool: nothing to
+            # offer; the legacy engine will be used automatically.
+            return False
+        # Translators: dialog offering to set up the high-accuracy engine.
+        result = gui.messageBox(
+            _("HardSub Reader can use the high-accuracy OneOCR engine, "
+              "but its files have not been set up yet. Set them up now? "
+              "This copies files from your own Snipping Tool and shows "
+              "an administrator prompt. If you choose No, the add-on "
+              "will use a lower-accuracy engine and will not ask again."),
+            # Translators: title of the engine setup dialog.
+            _("Set up high-accuracy engine?"),
+            wx.YES_NO | wx.ICON_QUESTION)
+        if result != wx.YES:
+            config.conf[CONF_SECTION]["engineSetupDeclined"] = True
+            return False
+        if launchEngineSetup():
+            # Translators: spoken after the elevated setup is launched.
+            ui.message(_(
+                "Engine setup is running in an administrator window. "
+                "When it reports it is done, press the subtitle reading "
+                "toggle again."))
+        else:
+            # Translators: spoken if the administrator prompt was refused.
+            ui.message(_(
+                "Setup was cancelled. Subtitle reading will use the "
+                "lower-accuracy engine; you can run setup_oneocr.ps1 "
+                "manually later."))
+        return True
 
     # ------------------------------------------------------------------
     def applySettings(self):

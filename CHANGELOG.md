@@ -1,6 +1,9 @@
 # Changelog
 
 ## 1.0.1
+- On Windows 11, the add-on now offers to set up the high-accuracy
+  engine automatically on first use (one administrator prompt), instead
+  of requiring a manual script run.
 - The OCR helper now ships as a self-contained program: installing
   Python is no longer required. A system Python (with Pillow) is used
   automatically as a fallback if the bundled helper cannot run.

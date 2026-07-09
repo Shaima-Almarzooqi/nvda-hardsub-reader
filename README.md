@@ -19,11 +19,12 @@ folder, which never contains subtitle text or screen content.
 1. Download the `.nvda-addon` file from the
    [Releases page](../../releases), open it to install, and restart
    NVDA.
-2. On Windows 11, for the high-accuracy engine: right-click
-   `setup_oneocr.ps1` from this repository and choose "Run with
-   PowerShell" as administrator (a one-time step that copies the engine
-   files from your own Snipping Tool). Skipping it is fine — the add-on
-   will use the fallback engine and tell you so.
+2. On Windows 11, the first time you start subtitle reading the add-on
+   offers to set up the high-accuracy OneOCR engine — answer Yes and
+   approve the administrator prompt (a one-time step that copies the
+   engine files from your own Snipping Tool). Declining is fine — the
+   add-on will use the fallback engine and tell you so. The same setup
+   can be run manually via `setup_oneocr.ps1` in this repository.
 
 Advanced: if the bundled helper is blocked on your system, the add-on
 falls back to running its helper script with system Python (3.10+ plus
@@ -50,8 +51,8 @@ subtitle-detection logic, and issue reports are very welcome.
 
 For developers: `python build_addon.py` builds the package,
 `python test_tracker.py` runs the test suite, and the GitHub Actions
-workflow builds the self-contained helper executables for both
-architectures and assembles the complete release package.
+workflow builds the self-contained helpers and assembles the complete
+release package.
 
 ## License
 
