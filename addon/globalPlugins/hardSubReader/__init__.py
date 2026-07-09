@@ -45,7 +45,25 @@ SIDECAR = os.path.join(SIDECAR_DIR, "subtitle_ocr_server.py")
 
 
 def _machineArch():
-    """The real OS architecture, seen from NVDA's 32-bit process."""
+    """The real OS architecture, seen from NVDA's 32-bit process.
+
+    Environment variables are unreliable under emulation (a 32-bit
+    process on ARM64 Windows can be told the machine is AMD64), so ask
+    Windows directly via IsWow64Process2, which reports the true native
+    machine. Falls back to environment variables on very old systems."""
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        pm = ctypes.c_ushort(0)
+        nm = ctypes.c_ushort(0)
+        if k32.IsWow64Process2(k32.GetCurrentProcess(),
+                               ctypes.byref(pm), ctypes.byref(nm)):
+            native = {0xAA64: "ARM64", 0x8664: "AMD64",
+                      0x014C: "X86"}.get(nm.value)
+            if native:
+                return native
+    except Exception:
+        pass
     arch = (os.environ.get("PROCESSOR_ARCHITEW6432")
             or os.environ.get("PROCESSOR_ARCHITECTURE") or "")
     return arch.upper()
@@ -73,7 +91,6 @@ config.conf.spec[CONF_SECTION] = {
     "repeatWindow": "integer(default=8, min=2, max=60)",
     "interrupt": "boolean(default=True)",
     "ocrLanguage": "string(default='en')",
-    "pythonPath": "string(default='')",
 }
 
 # Module-level reference so the settings panel can apply changes live.
@@ -86,9 +103,6 @@ def getConf(key):
 
 def findSystemPython():
     """Locate the user's native system Python (NOT NVDA's embedded one)."""
-    configured = getConf("pythonPath")
-    if configured and os.path.isfile(configured):
-        return [configured]
     env = os.environ.get("SUBTITLE_READER_PYTHON")
     if env and os.path.isfile(env):
         return [env]
@@ -186,13 +200,6 @@ class HardSubReaderSettingsPanel(SettingsPanel):
             wx.TextCtrl)
         self.langCtrl.SetValue(getConf("ocrLanguage"))
 
-        # Translators: label for the Python path field.
-        self.pythonCtrl = helper.addLabeledControl(
-            _("Advanced: full path to python.exe for the fallback helper. "
-              "Normally the add-on uses its bundled helper program and "
-              "this can stay empty:"),
-            wx.TextCtrl)
-        self.pythonCtrl.SetValue(getConf("pythonPath"))
 
     def onSave(self):
         c = config.conf[CONF_SECTION]
@@ -205,7 +212,6 @@ class HardSubReaderSettingsPanel(SettingsPanel):
         c["repeatWindow"] = self.windowCtrl.GetValue()
         c["interrupt"] = self.interruptCtrl.GetValue()
         c["ocrLanguage"] = self.langCtrl.GetValue().strip() or "en"
-        c["pythonPath"] = self.pythonCtrl.GetValue().strip()
         if _plugin is not None:
             _plugin.applySettings()
 
@@ -298,10 +304,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             # Translators: error when no system Python is found.
             # Translators: error when no way to run the OCR helper exists.
             ui.message(_(
-                "The OCR helper could not be started: no bundled helper "
-                "for this machine and no system Python found. Install "
-                "Python from python.org, or set its full path in the "
-                "HardSub Reader settings panel."))
+                "The OCR helper could not be started. Reinstall the "
+                "add-on, or install Python from python.org to use the "
+                "fallback mode."))
             return False
         try:
             # Keep the diagnostic log from growing forever: if it has

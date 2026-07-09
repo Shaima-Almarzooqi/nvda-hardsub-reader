@@ -19,8 +19,12 @@ jobs:
         include:
           - arch: x64
             runner: windows-latest
+            pyarch: x64
+            machine: "0x8664"
           - arch: arm64
             runner: windows-11-arm
+            pyarch: arm64
+            machine: "0xAA64"
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -28,6 +32,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          architecture: ${{ matrix.pyarch }}
+
+      - name: Verify Python architecture matches target
+        shell: pwsh
+        run: |
+          $m = python -c "import platform; print(platform.machine())"
+          Write-Host "Python reports machine: $m"
+          $want = if ("${{ matrix.arch }}" -eq "arm64") { "ARM64" } else { "AMD64" }
+          if ($m -ne $want) { throw "Wrong Python architecture: got $m, need $want. The built exe would not match the target machine." }
 
       - name: Install build dependencies
         shell: pwsh
@@ -47,6 +60,17 @@ jobs:
           if ($LASTEXITCODE -eq 0) { $collect = "--collect-all winocr" } else { $global:LASTEXITCODE = 0 }
           $cmd = "pyinstaller --onefile --console --name hardsub_helper_${{ matrix.arch }} $collect subtitle_ocr_server.py"
           Invoke-Expression $cmd
+
+      - name: Verify executable architecture
+        shell: pwsh
+        working-directory: addon/sidecar
+        run: |
+          $bytes = [IO.File]::ReadAllBytes("dist/hardsub_helper_${{ matrix.arch }}.exe")
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+          $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          $machineHex = "0x{0:X4}" -f $machine
+          Write-Host "PE machine type: $machineHex (expected ${{ matrix.machine }})"
+          if ($machineHex -ne "${{ matrix.machine }}") { throw "Built exe is the wrong architecture! This would silently fall back to the low-accuracy engine on user machines." }
 
       - name: Smoke test (helper starts and reports)
         shell: pwsh

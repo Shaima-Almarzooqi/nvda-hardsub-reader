@@ -18,8 +18,7 @@ folder, which never contains subtitle text or screen content.
 
 1. Download the `.nvda-addon` file from the
    [Releases page](../../releases), open it to install, and restart
-   NVDA. The OCR helper is bundled for both x64 and ARM64 Windows —
-   no other software needs to be installed.
+   NVDA.
 2. On Windows 11, for the high-accuracy engine: right-click
    `setup_oneocr.ps1` from this repository and choose "Run with
    PowerShell" as administrator (a one-time step that copies the engine
