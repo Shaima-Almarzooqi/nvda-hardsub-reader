@@ -30,7 +30,8 @@ folder, which never contains subtitle text or screen content.
 ## How to use
 
 - **NVDA+alt+shift+s** — start or stop subtitle reading. A high beep
-  means the engine is ready. Keep the video window focused.
+  means the engine is ready. Reading locks to the window focused when
+  you start it, so switching windows won't read other apps' text.
 - Interrupt behavior (whether a new subtitle cuts off the previous one)
   is in the add-on settings, with an assignable keystroke in the Input
   Gestures dialog.

@@ -323,6 +323,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         self._commandIndex = 0
         self._legacyIndex = None
         self._settled = False
+        self._lockHwnd = 0
         gui.settingsDialogs.NVDASettingsDialog.categoryClasses.append(
             HardSubReaderSettingsPanel)
         # Offer engine setup shortly after startup, once the NVDA GUI is
@@ -349,6 +350,14 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             else:
                 self._enabled = True
                 self._restartTimes = []
+                # Lock reading to the window focused right now (the video):
+                # switching windows later won't move the capture, and text
+                # from other windows is never read.
+                try:
+                    import ctypes
+                    self._lockHwnd = ctypes.windll.user32.GetForegroundWindow()
+                except Exception:
+                    self._lockHwnd = 0
                 self._commands = buildHelperCandidates()
                 self._commandIndex = 0
                 self._legacyIndex = None
@@ -438,6 +447,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             "--stable", str(getConf("stableFrames")),
             "--window", str(getConf("repeatWindow")),
             "--lang", getConf("ocrLanguage"),
+            "--hwnd", str(self._lockHwnd or 0),
         ]
 
     def _startProc(self):
@@ -576,6 +586,14 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                             "Note: using the legacy OCR engine with "
                             "reduced accuracy. See the add-on help to set "
                             "up the OneOCR engine."))
+                elif mtype == "window_gone":
+                    with self._lock:
+                        self._enabled = False
+                    # Translators: announced when the locked video window
+                    # is closed while subtitle reading is on.
+                    self._speak(_(
+                        "The video window was closed. Subtitle reading "
+                        "turned off."))
                 elif mtype == "error":
                     # Translators: spoken before an OCR helper error.
                     self._speak(_("Subtitle OCR error: {msg}").format(

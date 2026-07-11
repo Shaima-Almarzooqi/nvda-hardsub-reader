@@ -117,4 +117,27 @@ check("two-line subtitle",
 ev = run([(20, [])])
 check("silence on empty", ev == [], ev)
 
+# 13. Same-scan lines batch into ONE utterance (interrupt-safety fix)
+res = [("line", "I'm not the owner of this phone,"),
+       ("line", "but if you're looking for this phone..."),
+       ("suffix", "right now.")]
+b = mod.batch_results(res)
+check("same-scan lines batched",
+      b == [("line", "I'm not the owner of this phone,\n"
+                     "but if you're looking for this phone..."),
+            ("suffix", "right now.")], b)
+b2 = mod.batch_results([("line", "Hello?")])
+check("single line unchanged", b2 == [("line", "Hello?")], b2)
+
+# 14. RTL leading punctuation relocated to the end
+ar = "\u0644\u0645 \u0623\u0638\u0646 \u0623\u0646\u0646\u0627 \u0633\u0646\u0635\u0644"
+fixed = mod.fix_rtl_leading_punct("." + ar)
+check("rtl leading dot relocated", fixed == ar + ".", fixed)
+check("rtl clean line untouched",
+      mod.fix_rtl_leading_punct(ar) == ar, None)
+check("latin line untouched",
+      mod.fix_rtl_leading_punct(".Wait here.") == ".Wait here.", None)
+check("rtl multi punct relocated",
+      mod.fix_rtl_leading_punct("...\u061F" + ar) == ar + "...\u061F", None)
+
 print(f"\nAll {passed} tests passed against the real shipped module.")

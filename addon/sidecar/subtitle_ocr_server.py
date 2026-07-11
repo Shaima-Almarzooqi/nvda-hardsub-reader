@@ -97,6 +97,51 @@ def word_keys(s):
     return out
 
 
+_RTL_RANGES = ((0x0590, 0x08FF), (0xFB1D, 0xFDFF), (0xFE70, 0xFEFF))
+
+
+def _is_rtl_char(ch):
+    o = ord(ch)
+    return any(a <= o <= b for a, b in _RTL_RANGES)
+
+
+def fix_rtl_leading_punct(s):
+    """In right-to-left text, the sentence-ending punctuation sits at the
+    LEFT edge visually, so OCR (reading left to right spatially) often
+    returns it at the START of the line. A leading dot then gets spoken
+    ("dot") by the default voice before language switching kicks in.
+    For predominantly RTL lines, relocate leading sentence punctuation to
+    the end of the line, where it belongs."""
+    letters = [c for c in s if c.isalpha()]
+    if not letters:
+        return s
+    rtl = sum(1 for c in letters if _is_rtl_char(c))
+    if rtl / len(letters) < 0.6:
+        return s
+    i = 0
+    while i < len(s) and s[i] in ".!?\u2026\u061F\u060C:;,":
+        i += 1
+    lead = s[:i]
+    rest = s[i:].strip()
+    if not lead or not rest:
+        return s
+    return rest + lead
+
+
+def batch_results(results):
+    """Merge tracker output for ONE scan into utterances. Lines that
+    appear in the same scan are one subtitle and must be spoken as one
+    message; otherwise interrupt mode would cancel a subtitle's first
+    line to speak its own second line. Suffixes stay separate (they
+    never interrupt)."""
+    lines = [t for k, t in results if k == "line"]
+    out = []
+    if lines:
+        out.append(("line", "\n".join(lines)))
+    out.extend((k, t) for k, t in results if k == "suffix")
+    return out
+
+
 # ---------------------------------------------------------------------------
 # The dedup / stability / extension brain. Pure Python, no Windows APIs,
 # so it is directly unit-testable on any platform (see test_tracker.py).
@@ -312,8 +357,12 @@ try:
     import ctypes
     import ctypes.wintypes as wt
     user32 = ctypes.windll.user32
+    gdi32 = ctypes.windll.gdi32
 except Exception:  # not on Windows (unit tests)
     user32 = None
+    gdi32 = None
+
+LOCK_HWND = 0  # window handle to lock capture to; 0 = follow focus
 
 SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN = 76, 77
 SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 78, 79
@@ -329,6 +378,78 @@ def virtual_screen():
 
 def primary_screen():
     return 0, 0, user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+
+
+class BITMAPINFOHEADER(ctypes.Structure if 'ctypes' in dir() else object):
+    pass
+
+
+if user32 is not None:
+    class BITMAPINFOHEADER(ctypes.Structure):
+        _fields_ = [
+            ("biSize", wt.DWORD), ("biWidth", wt.LONG),
+            ("biHeight", wt.LONG), ("biPlanes", wt.WORD),
+            ("biBitCount", wt.WORD), ("biCompression", wt.DWORD),
+            ("biSizeImage", wt.DWORD), ("biXPelsPerMeter", wt.LONG),
+            ("biYPelsPerMeter", wt.LONG), ("biClrUsed", wt.DWORD),
+            ("biClrImportant", wt.DWORD)]
+
+
+def capture_locked_window(hwnd):
+    """Capture the bottom strip of a specific window even when it is not
+    in the foreground. Returns a PIL Image, or None when capture is not
+    possible (then the caller skips the frame: fail toward silence,
+    never toward reading a different window's text)."""
+    from PIL import Image, ImageGrab
+    rect = wt.RECT()
+    if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+        return None
+    w, h = rect.right - rect.left, rect.bottom - rect.top
+    if w < 300 or h < 200:
+        return None
+    # Cheapest correct path: when the locked window IS in the foreground,
+    # a plain screen grab of its rectangle is accurate.
+    if user32.GetForegroundWindow() == hwnd:
+        strip_top = rect.bottom - int(h * REGION_FRACTION)
+        return ImageGrab.grab(
+            bbox=(rect.left, strip_top, rect.right, rect.bottom),
+            all_screens=True)
+    # Occluded/background: ask the window to render its own contents
+    # (PrintWindow with PW_RENDERFULLCONTENT). Works for most apps; some
+    # video pipelines return a blank frame, which we treat as failure.
+    hdc_win = user32.GetWindowDC(hwnd)
+    if not hdc_win:
+        return None
+    img = None
+    hdc_mem = gdi32.CreateCompatibleDC(hdc_win)
+    bmp = gdi32.CreateCompatibleBitmap(hdc_win, w, h)
+    try:
+        gdi32.SelectObject(hdc_mem, bmp)
+        if user32.PrintWindow(hwnd, hdc_mem, 2):  # PW_RENDERFULLCONTENT
+            bmi = BITMAPINFOHEADER()
+            bmi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+            bmi.biWidth = w
+            bmi.biHeight = -h  # top-down
+            bmi.biPlanes = 1
+            bmi.biBitCount = 32
+            bmi.biCompression = 0
+            buf = ctypes.create_string_buffer(w * h * 4)
+            got = gdi32.GetDIBits(hdc_mem, bmp, 0, h, buf,
+                                  ctypes.byref(bmi), 0)
+            if got:
+                img = Image.frombuffer(
+                    "RGB", (w, h), buf, "raw", "BGRX", 0, 1)
+    finally:
+        gdi32.DeleteObject(bmp)
+        gdi32.DeleteDC(hdc_mem)
+        user32.ReleaseDC(hwnd, hdc_win)
+    if img is None:
+        return None
+    strip = img.crop((0, h - int(h * REGION_FRACTION), w, h))
+    # A blank render means this app doesn't support background capture.
+    if strip.convert("L").getextrema() == (0, 0):
+        return None
+    return strip
 
 
 def get_capture_region():
@@ -391,7 +512,10 @@ def parse_args():
     p.add_argument("--stable", type=int, default=STABLE_FRAMES)
     p.add_argument("--window", type=float, default=REPEAT_WINDOW)
     p.add_argument("--lang", type=str, default=OCR_LANG)
+    p.add_argument("--hwnd", type=int, default=0)
     a = p.parse_args()
+    global LOCK_HWND
+    LOCK_HWND = a.hwnd
     POLL_INTERVAL = max(0.1, min(2.0, a.interval))
     REGION_FRACTION = max(0.10, min(1.0, a.region / 100.0))
     STABLE_FRAMES = max(1, min(5, a.stable))
@@ -432,15 +556,31 @@ def main():
     tracker = SubtitleTracker()
     consecutive_failures = 0
 
+    if LOCK_HWND:
+        log(f"locked to window handle {LOCK_HWND}")
+
     while True:
         t0 = time.perf_counter()
         lines = []
         try:
-            region = get_capture_region()
-            img = ImageGrab.grab(bbox=region, all_screens=True)
-            img = safe_image(img)
-            raw = recognize(img)
-            lines = [ln for ln in raw.split("\n") if ln.strip()]
+            if LOCK_HWND:
+                if not user32.IsWindow(LOCK_HWND):
+                    # The video window was closed: tell NVDA and exit
+                    # cleanly instead of reading some other window.
+                    emit({"type": "window_gone"})
+                    return
+                if user32.IsIconic(LOCK_HWND):
+                    img = None  # minimized: nothing to read this frame
+                else:
+                    img = capture_locked_window(LOCK_HWND)
+            else:
+                region = get_capture_region()
+                img = ImageGrab.grab(bbox=region, all_screens=True)
+            if img is not None:
+                img = safe_image(img)
+                raw = recognize(img)
+                lines = [fix_rtl_leading_punct(ln)
+                         for ln in raw.split("\n") if ln.strip()]
             consecutive_failures = 0
         except Exception as e:
             consecutive_failures += 1
@@ -450,7 +590,8 @@ def main():
                 emit({"type": "error", "message": f"OCR keeps failing: {e}"})
 
         try:
-            for kind, text in tracker.update(lines, time.time()):
+            results = tracker.update(lines, time.time())
+            for kind, text in batch_results(results):
                 emit({"type": "subtitle", "kind": kind, "text": text})
         except Exception:
             # The tracker must never kill the process; log and continue.

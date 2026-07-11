@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.0
+- Window locking: subtitle reading now stays attached to the video
+  window it was started on. Switching to other windows no longer moves
+  the capture or reads their text, and closing the video window turns
+  reading off with an announcement.
+- Multi-line subtitles are now spoken as a single utterance, fixing a
+  problem where, with interrupt mode on, the second line of a subtitle
+  cut off the first.
+- Right-to-left subtitles (such as Arabic): sentence punctuation that
+  OCR places at the start of a line is now moved to its correct position
+  at the end, so voices no longer announce a stray "dot" before each
+  line.
+
 ## 1.0.1
 - On Windows 11, the add-on now offers to set up the high-accuracy
   engine automatically on first use (one administrator prompt), instead
