@@ -338,21 +338,11 @@ class HardSubReaderSettingsPanel(SettingsPanel):
         if _plugin is not None:
             _plugin._runEngineSetup()
 
-    def onSave(self):
-        c = config.conf[CONF_SECTION]
-        c["pollInterval"] = self.SPEED_CHOICES[
-            self.speedCtrl.GetSelection()][1]
-        c["regionPercent"] = self.AREA_CHOICES[
-            self.areaCtrl.GetSelection()][1]
-        c["stableFrames"] = self.FILTER_CHOICES[
-            self.filterCtrl.GetSelection()][1]
-        c["repeatWindow"] = self.windowCtrl.GetValue()
-        c["interrupt"] = self.interruptCtrl.GetValue()
-        c["ocrLanguage"] = self.langCtrl.GetValue().strip() or "en"
-
-        checked = [key for key, cb in self.builtinCtrls if cb.GetValue()]
-        c["noiseFilterBuiltins"] = ",".join(checked)
-
+    def isValid(self):
+        # NVDA calls this before closing the settings dialog; returning
+        # False keeps the panel OPEN with the user's text intact, so a
+        # typo in a filter pattern can be fixed immediately instead of
+        # silently vanishing after the dialog closes.
         customText = self.noiseTextCtrl.GetValue()
         badLines = []
         for lineNo, ln in enumerate(customText.splitlines(), 1):
@@ -368,16 +358,31 @@ class HardSubReaderSettingsPanel(SettingsPanel):
                 for n, ln, err in badLines[:5])
             gui.messageBox(
                 # Translators: shown when a regex filter rule is invalid.
-                _("These filter lines are not valid patterns and were "
-                  "not saved. Fix or remove them and save again:\n\n"
+                _("These filter lines are not valid patterns. Fix or "
+                  "remove them, then save again:\n\n"
                   "{details}").format(details=details),
                 _("HardSub Reader: invalid filter"),
                 wx.OK | wx.ICON_WARNING)
-            badSet = {n for n, _l, _e in badLines}
-            customText = "\n".join(
-                ln for i, ln in enumerate(customText.splitlines(), 1)
-                if i not in badSet)
-        c["noiseFilterText"] = customText
+            return False
+        return True
+
+    def onSave(self):
+        # isValid() has already confirmed every custom line compiles,
+        # so onSave only runs once the input is known-good.
+        c = config.conf[CONF_SECTION]
+        c["pollInterval"] = self.SPEED_CHOICES[
+            self.speedCtrl.GetSelection()][1]
+        c["regionPercent"] = self.AREA_CHOICES[
+            self.areaCtrl.GetSelection()][1]
+        c["stableFrames"] = self.FILTER_CHOICES[
+            self.filterCtrl.GetSelection()][1]
+        c["repeatWindow"] = self.windowCtrl.GetValue()
+        c["interrupt"] = self.interruptCtrl.GetValue()
+        c["ocrLanguage"] = self.langCtrl.GetValue().strip() or "en"
+
+        checked = [key for key, cb in self.builtinCtrls if cb.GetValue()]
+        c["noiseFilterBuiltins"] = ",".join(checked)
+        c["noiseFilterText"] = self.noiseTextCtrl.GetValue()
 
         if _plugin is not None:
             _plugin.applySettings()
