@@ -12,6 +12,7 @@
 # Settings: NVDA menu -> Preferences -> Settings -> HardSub Reader
 
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -119,7 +120,32 @@ config.conf.spec[CONF_SECTION] = {
     "ocrLanguage": "string(default='en')",
     "preferredHelper": "string(default='')",
     "engineSetupOffered": "boolean(default=False)",
+    "noiseFilterText": "string(default='')",
+    "noiseFilterBuiltins": "string(default='')",
 }
+
+# Built-in noise filter choices for the settings panel picker. The
+# "rule" string is exactly what gets sent to the sidecar's NoiseFilter
+# (a "regex:" prefix means a regular expression; otherwise literal
+# text). Keep in sync with BUILTIN_NOISE_PATTERNS in the sidecar.
+BUILTIN_NOISE_CHOICES = [
+    ("timestamps",
+     # Translators: a built-in noise filter choice.
+     _("Bare timestamps, such as 12:34"),
+     r"regex:^\d{1,2}:\d{2}(:\d{2})?$"),
+    ("allcaps_short",
+     # Translators: a built-in noise filter choice.
+     _("Short all-capitals text, such as channel logos or watermarks"),
+     r"regex:^[A-Z\s]{2,15}$"),
+    ("skip_ad",
+     # Translators: a built-in noise filter choice.
+     _("Ad-skip prompts, such as 'Skip Ad'"),
+     r"regex:^(skip ad|skip in \d+s?|skip ads?)$"),
+    ("no_real_words",
+     # Translators: a built-in noise filter choice.
+     _("Lines with no real words, such as misread icons or symbols"),
+     r"regex:^(?!.*[a-zA-Z\u0600-\u06FF\u0400-\u04FF]{3,}).*$"),
+]
 
 ENGINE_DIR = os.path.join(os.path.expanduser("~"), ".config", "oneocr")
 ENGINE_FILES = ("oneocr.dll", "oneocr.onemodel", "onnxruntime.dll")
@@ -265,6 +291,29 @@ class HardSubReaderSettingsPanel(SettingsPanel):
             wx.TextCtrl)
         self.langCtrl.SetValue(getConf("ocrLanguage"))
 
+        # Translators: heading above the noise-filter controls.
+        helper.addItem(wx.StaticText(self, label=_(
+            "Text to never read aloud:")))
+
+        checkedBuiltins = set(
+            getConf("noiseFilterBuiltins").split(",")) if getConf(
+            "noiseFilterBuiltins") else set()
+        self.builtinCtrls = []
+        for key, label, _rule in BUILTIN_NOISE_CHOICES:
+            cb = wx.CheckBox(self, label=label)
+            cb.SetValue(key in checkedBuiltins)
+            helper.addItem(cb)
+            self.builtinCtrls.append((key, cb))
+
+        # Translators: label for the custom noise-filter text box.
+        self.noiseTextCtrl = helper.addLabeledControl(
+            _("Your own phrases to filter, one per line. Type text "
+              "exactly as it appears in subtitles to remove that "
+              "exact line whenever it appears. Advanced: start a "
+              "line with regex: to use a regular expression instead:"),
+            wx.TextCtrl, style=wx.TE_MULTILINE, size=(-1, 80))
+        self.noiseTextCtrl.SetValue(getConf("noiseFilterText"))
+
         # Translators: button that sets up the high-accuracy OneOCR engine.
         self.setupBtn = wx.Button(self, label=_(
             "Set up the high-accuracy OneOCR engine now..."))
@@ -300,6 +349,36 @@ class HardSubReaderSettingsPanel(SettingsPanel):
         c["repeatWindow"] = self.windowCtrl.GetValue()
         c["interrupt"] = self.interruptCtrl.GetValue()
         c["ocrLanguage"] = self.langCtrl.GetValue().strip() or "en"
+
+        checked = [key for key, cb in self.builtinCtrls if cb.GetValue()]
+        c["noiseFilterBuiltins"] = ",".join(checked)
+
+        customText = self.noiseTextCtrl.GetValue()
+        badLines = []
+        for lineNo, ln in enumerate(customText.splitlines(), 1):
+            stripped = ln.strip()
+            if stripped.lower().startswith("regex:"):
+                try:
+                    re.compile(stripped[len("regex:"):].strip())
+                except re.error as e:
+                    badLines.append((lineNo, ln, str(e)))
+        if badLines:
+            details = "\n".join(
+                f"Line {n}: {ln.strip()!r} -- {err}"
+                for n, ln, err in badLines[:5])
+            gui.messageBox(
+                # Translators: shown when a regex filter rule is invalid.
+                _("These filter lines are not valid patterns and were "
+                  "not saved. Fix or remove them and save again:\n\n"
+                  "{details}").format(details=details),
+                _("HardSub Reader: invalid filter"),
+                wx.OK | wx.ICON_WARNING)
+            badSet = {n for n, _l, _e in badLines}
+            customText = "\n".join(
+                ln for i, ln in enumerate(customText.splitlines(), 1)
+                if i not in badSet)
+        c["noiseFilterText"] = customText
+
         if _plugin is not None:
             _plugin.applySettings()
 
@@ -440,8 +519,19 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                 # new configuration.
                 self._stopProc()
 
+    def _noiseFilterRules(self):
+        rules = []
+        checked = set(getConf("noiseFilterBuiltins").split(","))
+        for key, _label, rule in BUILTIN_NOISE_CHOICES:
+            if key in checked:
+                rules.append(rule)
+        custom = getConf("noiseFilterText")
+        if custom:
+            rules.extend(ln for ln in custom.splitlines() if ln.strip())
+        return rules
+
     def _sidecarArgs(self):
-        return [
+        args = [
             "--interval", str(getConf("pollInterval")),
             "--region", str(getConf("regionPercent")),
             "--stable", str(getConf("stableFrames")),
@@ -449,6 +539,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             "--lang", getConf("ocrLanguage"),
             "--hwnd", str(self._lockHwnd or 0),
         ]
+        rules = self._noiseFilterRules()
+        if rules:
+            import base64
+            blob = "\n".join(rules).encode("utf-8")
+            args += ["--filters-b64",
+                    base64.urlsafe_b64encode(blob).decode("ascii")]
+        return args
 
     def _startProc(self):
         if not self._commands:
@@ -594,6 +691,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                     self._speak(_(
                         "The video window was closed. Subtitle reading "
                         "turned off."))
+                elif mtype == "filter_warning":
+                    self._speak(msg.get("message", ""))
                 elif mtype == "error":
                     # Translators: spoken before an OCR helper error.
                     self._speak(_("Subtitle OCR error: {msg}").format(

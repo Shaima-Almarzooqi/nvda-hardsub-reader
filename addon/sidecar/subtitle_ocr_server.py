@@ -27,6 +27,7 @@ The process exits when its stdin is closed.
 """
 import difflib
 import faulthandler
+import re
 import json
 import os
 import platform
@@ -126,6 +127,81 @@ def fix_rtl_leading_punct(s):
     if not lead or not rest:
         return s
     return rest + lead
+
+
+class NoiseFilter:
+    """Lines the user never wants read: exact-text phrases and/or regex
+    patterns. Matching is EXACT-LINE only (the whole recognized line must
+    match), never substring -- this prevents a filter for a short phrase
+    from silently eating real dialogue that happens to contain it.
+
+    Rules are plain strings. A rule prefixed with "regex:" is compiled as
+    a case-insensitive regular expression; anything else is compared as
+    literal text (case-insensitive, whitespace-trimmed). Invalid regex
+    rules are skipped (never crash, never block the good rules) and
+    reported back via .errors so the caller can inform the user.
+    """
+
+    def __init__(self, rules):
+        self.errors = []       # (rule_text, error_message)
+        self._literals = set()
+        self._patterns = []    # compiled regex objects
+        for raw in rules:
+            rule = raw.strip()
+            if not rule:
+                continue
+            if rule.lower().startswith("regex:"):
+                pattern_src = rule[len("regex:"):].strip()
+                if not pattern_src:
+                    continue
+                try:
+                    self._patterns.append(re.compile(
+                        pattern_src, re.IGNORECASE))
+                except re.error as e:
+                    self.errors.append((raw, str(e)))
+            else:
+                self._literals.add(rule.lower())
+
+    def is_noise(self, line):
+        text = line.strip()
+        if not text:
+            return False
+        if text.lower() in self._literals:
+            return True
+        for pat in self._patterns:
+            try:
+                if pat.fullmatch(text):
+                    return True
+            except Exception:
+                continue  # a pathological pattern must never crash capture
+        return False
+
+    def filter_lines(self, lines):
+        """Returns (kept_lines, dropped_lines) for logging."""
+        kept, dropped = [], []
+        for ln in lines:
+            (dropped if self.is_noise(ln) else kept).append(ln)
+        return kept, dropped
+
+
+# Built-in patterns for the settings-panel picker. Each key is a stable
+# identifier stored in config; label/description are shown to the user;
+# rule is what actually gets added to the filter list when checked.
+BUILTIN_NOISE_PATTERNS = {
+    "timestamps": {
+        "rule": r"regex:^\d{1,2}:\d{2}(:\d{2})?$",
+    },
+    "allcaps_short": {
+        "rule": r"regex:^[A-Z\s]{2,15}$",
+    },
+    "skip_ad": {
+        "rule": r"regex:^(skip ad|skip in \d+s?|skip ads?)$",
+    },
+    "no_real_words": {
+        "rule": (r"regex:^(?!.*[a-zA-Z\u0600-\u06FF\u0400-\u04FF]"
+                r"{3,}).*$"),
+    },
+}
 
 
 def batch_results(results):
@@ -513,9 +589,20 @@ def parse_args():
     p.add_argument("--window", type=float, default=REPEAT_WINDOW)
     p.add_argument("--lang", type=str, default=OCR_LANG)
     p.add_argument("--hwnd", type=int, default=0)
+    p.add_argument("--filters-b64", type=str, default="")
     a = p.parse_args()
     global LOCK_HWND
     LOCK_HWND = a.hwnd
+    rules = []
+    if a.filters_b64:
+        try:
+            import base64
+            blob = base64.urlsafe_b64decode(
+                a.filters_b64.encode("ascii")).decode("utf-8")
+            rules = [ln for ln in blob.split("\n") if ln.strip()]
+        except Exception:
+            log("Could not decode --filters-b64; ignoring noise filters.")
+    return NoiseFilter(rules)
     POLL_INTERVAL = max(0.1, min(2.0, a.interval))
     REGION_FRACTION = max(0.10, min(1.0, a.region / 100.0))
     STABLE_FRAMES = max(1, min(5, a.stable))
@@ -524,7 +611,7 @@ def parse_args():
 
 
 def main():
-    parse_args()
+    noise_filter = parse_args()
     threading.Thread(target=watch_stdin, daemon=True).start()
 
     try:
@@ -546,6 +633,12 @@ def main():
                          f"Details: {e}"})
         sys.exit(1)
 
+    if noise_filter.errors:
+        bad = "; ".join(f"'{r}': {e}" for r, e in noise_filter.errors[:3])
+        log(f"Ignored invalid filter rule(s): {bad}")
+        emit({"type": "filter_warning",
+              "message": f"{len(noise_filter.errors)} filter rule(s) "
+                         "could not be understood and were skipped."})
     emit({"type": "ready", "engine": engine_name})
     log(f"runtime: frozen={getattr(sys, 'frozen', False)} "
         f"machine={platform.machine()} exe={sys.executable}")
@@ -581,6 +674,9 @@ def main():
                 raw = recognize(img)
                 lines = [fix_rtl_leading_punct(ln)
                          for ln in raw.split("\n") if ln.strip()]
+                lines, dropped = noise_filter.filter_lines(lines)
+                for d in dropped:
+                    log(f"Filtered as noise: {d!r}")
             consecutive_failures = 0
         except Exception as e:
             consecutive_failures += 1

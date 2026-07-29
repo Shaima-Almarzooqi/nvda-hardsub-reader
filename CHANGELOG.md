@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.0
+- Added noise filtering: a list of phrases or patterns that are never
+  read aloud. Choose from common built-in options (bare timestamps,
+  short ALL-CAPS watermarks, ad-skip prompts, symbol-only misreads) or
+  type your own phrases. Custom phrases match only a whole subtitle
+  line exactly, so they cannot accidentally remove dialogue that merely
+  contains the same words. Advanced users can start a line with
+  "regex:" to use a regular expression instead.
+
 ## 1.1.0
 - Window locking: subtitle reading now stays attached to the video
   window it was started on. Switching to other windows no longer moves

@@ -140,4 +140,42 @@ check("latin line untouched",
 check("rtl multi punct relocated",
       mod.fix_rtl_leading_punct("...\u061F" + ar) == ar + "...\u061F", None)
 
+# 15. NoiseFilter: exact-line-only plain text matching
+nf = mod.NoiseFilter(["Yapim: Ay Yapim", "Skip Ad"])
+check("plain exact-line match filtered", nf.is_noise("Yapim: Ay Yapim"))
+check("plain text substring NOT filtered (exact-line only)",
+      not nf.is_noise("Before Yapim: Ay Yapim after"))
+check("unrelated line not filtered", not nf.is_noise("Hello there."))
+check("case-insensitive plain match",
+      nf.is_noise("skip ad"))
+
+# 16. NoiseFilter: regex rules via "regex:" prefix
+nf2 = mod.NoiseFilter([r"regex:^\d{1,2}:\d{2}$", "Wait."])
+check("regex matches bare timestamp", nf2.is_noise("12:34"))
+check("regex does not match dialogue",
+      not nf2.is_noise("It's almost 12:34, we should go."))
+check("plain rule still works alongside regex",
+      nf2.is_noise("Wait."))
+
+# 17. NoiseFilter: invalid regex is skipped, not fatal, and reported
+nf3 = mod.NoiseFilter(["regex:([unclosed", "Good line stays"])
+check("invalid regex recorded as an error", len(nf3.errors) == 1)
+check("invalid regex does not crash matching",
+      not nf3.is_noise("anything at all"))
+check("good rules still work despite a bad one",
+      nf3.is_noise("Good line stays"))
+
+# 18. filter_lines splits kept vs dropped, preserving order
+nf4 = mod.NoiseFilter(["NOISE"])
+kept, dropped = nf4.filter_lines(["Hello.", "NOISE", "World."])
+check("filter_lines keeps good lines in order",
+      kept == ["Hello.", "World."], kept)
+check("filter_lines collects dropped lines", dropped == ["NOISE"], dropped)
+
+# 19. Built-in patterns registry sanity: every entry compiles
+for key, info in mod.BUILTIN_NOISE_PATTERNS.items():
+    rule = info["rule"]
+    check(f"builtin '{key}' rule is well-formed",
+          rule.startswith("regex:") and mod.NoiseFilter([rule]).errors == [])
+
 print(f"\nAll {passed} tests passed against the real shipped module.")
