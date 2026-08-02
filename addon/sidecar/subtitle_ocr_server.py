@@ -1,4 +1,4 @@
-"""Subtitle OCR sidecar server (v1.0).
+"""Subtitle OCR sidecar server.
 
 Runs OUTSIDE NVDA, in the system's native Python (ARM64 or x64), where the
 OCR engine can load. NVDA's addon spawns this process and reads one JSON
@@ -55,6 +55,7 @@ STABLE_FRAMES = 2
 SIMILARITY_THRESHOLD = 0.85
 REPEAT_WINDOW = 8.0
 OCR_LANG = "en"
+LANG_FILTER_ON = False
 MIN_DIM = 64                 # pad captures below this size (DLL crash guard)
 
 _PUNCT = ".,!?;:\"'\u2026\u2019\u2018\u201c\u201d-\u2013\u2014()[]"
@@ -82,10 +83,345 @@ def normalize(s):
     return " ".join(s.split())
 
 
+# How many consecutive scans a pending line may be missing before it is
+# forgotten. 1 = tolerate a single dropped frame.
+PENDING_GRACE_SCANS = 1
+
+# Same-script language hints. A line is only judged when it has at
+# least this many words, another language must reach this much
+# evidence, and must beat the chosen language by this margin.
+MIN_WORDS_FOR_LANG_HINT = 3
+MIN_HINT_EVIDENCE = 2
+HINT_MARGIN = 2
+
+
 def similar(a, b):
     if not a or not b:
         return 0.0
     return difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio()
+
+
+# ---------------------------------------------------------------------------
+# Script and language handling. Every rule here is script-generic: it must
+# behave identically for all supported writing systems, with no alphabet
+# treated as a special case.
+# ---------------------------------------------------------------------------
+
+# Ordered ranges: (script name, first codepoint, last codepoint).
+_SCRIPT_RANGES = (
+    ("latin", 0x0041, 0x024F),
+    ("greek", 0x0370, 0x03FF),
+    ("greek", 0x1F00, 0x1FFF),
+    ("cyrillic", 0x0400, 0x052F),
+    ("armenian", 0x0530, 0x058F),
+    ("hebrew", 0x0590, 0x05FF),
+    ("arabic", 0x0600, 0x06FF),
+    ("arabic", 0x0750, 0x077F),
+    ("arabic", 0x08A0, 0x08FF),
+    ("arabic", 0xFB50, 0xFDFF),   # presentation forms
+    ("arabic", 0xFE70, 0xFEFF),   # presentation forms-B
+    ("syriac", 0x0700, 0x074F),
+    ("thaana", 0x0780, 0x07BF),
+    ("devanagari", 0x0900, 0x097F),
+    ("bengali", 0x0980, 0x09FF),
+    ("gurmukhi", 0x0A00, 0x0A7F),
+    ("gujarati", 0x0A80, 0x0AFF),
+    ("oriya", 0x0B00, 0x0B7F),
+    ("tamil", 0x0B80, 0x0BFF),
+    ("telugu", 0x0C00, 0x0C7F),
+    ("kannada", 0x0C80, 0x0CFF),
+    ("malayalam", 0x0D00, 0x0D7F),
+    ("sinhala", 0x0D80, 0x0DFF),
+    ("thai", 0x0E00, 0x0E7F),
+    ("lao", 0x0E80, 0x0EFF),
+    ("tibetan", 0x0F00, 0x0FFF),
+    ("myanmar", 0x1000, 0x109F),
+    ("georgian", 0x10A0, 0x10FF),
+    ("ethiopic", 0x1200, 0x137F),
+    ("khmer", 0x1780, 0x17FF),
+    ("hangul", 0x1100, 0x11FF),
+    ("hangul", 0xAC00, 0xD7AF),
+    ("hangul", 0x3130, 0x318F),
+    ("kana", 0x3040, 0x309F),
+    ("kana", 0x30A0, 0x30FF),
+    ("han", 0x3400, 0x4DBF),
+    ("han", 0x4E00, 0x9FFF),
+    ("han", 0xF900, 0xFAFF),
+    ("canadian", 0x1400, 0x167F),   # Inuktitut, Cree
+    ("yi", 0xA000, 0xA48F),
+    ("cherokee", 0x13A0, 0x13FF),
+    ("mongolian", 0x1800, 0x18AF),
+    ("nko", 0x07C0, 0x07FF),
+)
+
+# Primary language subtag -> accepted scripts.
+#
+# Built from compact per-script lists so it covers EVERY ISO 639-1 code
+# (plus widely used three-letter ones), not a hand-picked subset. Any
+# language whose code is not listed is handled by the fallbacks below,
+# and a script name may also be typed directly.
+_SCRIPT_LANGS = {
+    "arabic": "ar fa ur ps ks sd ug ku arb pes urd pus snd uig ckb fas",
+    "hebrew": "he yi iw heb yid",
+    "cyrillic": ("ru uk bg sr mk be kk ky tg mn ab av ba ce cu cv kv os tt "
+                 "rus ukr bel bul srp mkd kaz kir tgk mon tat"),
+    "greek": "el ell gre grc",
+    "armenian": "hy hye arm",
+    "georgian": "ka kat geo",
+    "ethiopic": "am ti amh tir",
+    "devanagari": "hi mr ne sa bh pi hin mar nep san bho mai",
+    "bengali": "bn as ben asm",
+    "gurmukhi": "pa pan",
+    "gujarati": "gu guj",
+    "oriya": "or ori ory",
+    "tamil": "ta tam",
+    "telugu": "te tel",
+    "kannada": "kn kan",
+    "malayalam": "ml mal",
+    "sinhala": "si sin",
+    "thai": "th tha",
+    "lao": "lo lao",
+    "tibetan": "bo dz bod tib dzo",
+    "myanmar": "my mya bur",
+    "khmer": "km khm",
+    "thaana": "dv div",
+    "syriac": "syr syc",
+    "canadian": "iu cr iku cre",
+    "yi": "ii iii",
+    "cherokee": "chr",
+    "mongolian": "mvf",
+    "nko": "nqo",
+    "han": "zh zho chi cmn yue nan hak wuu",
+}
+# Languages that mix scripts.
+_MULTI_SCRIPT_LANGS = {
+    "ja": ("kana", "han"), "jpn": ("kana", "han"),
+    "ko": ("hangul", "han"), "kor": ("hangul", "han"),
+}
+
+_LANG_SCRIPTS = {}
+for _script, _codes in _SCRIPT_LANGS.items():
+    for _c in _codes.split():
+        _LANG_SCRIPTS[_c] = (_script,)
+_LANG_SCRIPTS.update(_MULTI_SCRIPT_LANGS)
+
+# Every remaining ISO 639-1 language is written in the Latin alphabet.
+for _c in ("aa af ak an ay az bi bm br bs ca ch co cs cy da de ee en eo es "
+           "et eu ff fi fj fo fr fy ga gd gl gn gv ha ho hr ht hu hz ia id "
+           "ie ig ik io is it jv kg ki kj kl kr kw la lb lg li ln lt lu lv "
+           "mg mh mi ms mt na nb nd ng nl nn no nr nv ny oc oj om pl pt qu "
+           "rm rn ro rw sc se sg sk sl sm sn so sq ss st su sv sw tk tl tn "
+           "to tr ts tw ty uz ve vi vo wa wo xh yo za zu "
+           "eng fra fre deu ger spa ita por nld dut swe dan nor fin isl tur "
+           "pol ces cze slk slv hrv hun ron rum lit lav est sqi alb eus baz "
+           "cat glg ind msa may vie tgl fil swa afr zul xho som hau yor ibo "
+           "aze uzb tuk kur lat epo").split():
+    _LANG_SCRIPTS.setdefault(_c, ("latin",))
+
+# A script name may be entered directly, for anything not covered above.
+_KNOWN_SCRIPTS = {name for name, _lo, _hi in _SCRIPT_RANGES}
+for _s in _KNOWN_SCRIPTS:
+    _LANG_SCRIPTS.setdefault(_s, (_s,))
+_LANG_SCRIPTS.setdefault("japanese", ("kana", "han"))
+_LANG_SCRIPTS.setdefault("korean", ("hangul", "han"))
+_LANG_SCRIPTS.setdefault("chinese", ("han",))
+_LANG_SCRIPTS.setdefault("katakana", ("kana",))
+_LANG_SCRIPTS.setdefault("hiragana", ("kana",))
+
+
+def script_of(ch):
+    """Script name for a character, or None if it is not a letter."""
+    cp = ord(ch)
+    for name, lo, hi in _SCRIPT_RANGES:
+        if lo <= cp <= hi:
+            return name
+    return None
+
+
+def has_letters(text):
+    """True if the text contains at least one letter in ANY script."""
+    return any(script_of(c) for c in text)
+
+
+def letter_count(text):
+    """Number of letters in any writing system.
+
+    Used to identify fragments too short to be a word, while leaving
+    genuine one- and two-letter interjections intact."""
+    return sum(1 for c in text if script_of(c))
+
+
+def script_histogram(text):
+    counts = {}
+    for c in text:
+        s = script_of(c)
+        if s:
+            counts[s] = counts.get(s, 0) + 1
+    return counts
+
+
+# ---------------------------------------------------------------------------
+# Same-script language hints.
+#
+# Script matching cannot separate languages that share an alphabet. These
+# tables provide a second, weaker signal: letters used by only some
+# languages, plus common function words.
+#
+# The decision is asymmetric by design. A line is discarded only when
+# there is positive evidence that it belongs to a different language;
+# absence of evidence means the line is kept. Short or ambiguous lines
+# are therefore always read.
+# ---------------------------------------------------------------------------
+
+# language -> (distinctive letters, very common short words)
+_LANG_HINTS = {
+    # --- Latin script -----------------------------------------------------
+    "en": ("", "the and of to is it in that you for was with this have not"),
+    "tr": ("\u0131\u011f\u015f\u0130", "bir ve bu ile i\u00e7in ama de\u011fil "
+           "\u00e7ok daha ne var gibi"),
+    "es": ("\u00f1\u00bf\u00a1", "el la los las que de en un una por con no para "
+           "es se lo"),
+    "fr": ("\u0153", "le la les des que de est pas une pour dans qui vous je "
+           "ne au"),
+    "de": ("\u00df", "der die das und ist nicht ein eine mit sich auf von zu "
+           "den dem"),
+    "it": ("", "il la che di non per una sono con come pi\u00f9 sono nel gli"),
+    "pt": ("\u00e3\u00f5", "o a que de para com uma n\u00e3o em por mais "
+           "como est\u00e1 ele"),
+    "nl": ("\u0132", "de het een van dat is niet en op voor met zijn maar ook"),
+    "pl": ("\u0142\u0105\u0119\u017c\u017a\u0107\u0144\u015b",
+           "nie jest to sie na do jak ale czy tak juz tylko"),
+    "cs": ("\u0159\u016f\u011b", "je na se to ne ale jak co za tak jsem by"),
+    "hu": ("\u0151\u0171", "az egy hogy nem is de meg csak van ez ki mint"),
+    "ro": ("\u0103\u021b\u0219", "si de la nu ce el un o pe cu care este"),
+    "sv": ("", "och att det som en av jag inte har den vi till"),
+    "da": ("", "og det er en til at jeg ikke den med for af"),
+    "no": ("", "og det er en til at jeg ikke den med for av"),
+    "fi": ("", "on ei ja se ett\u00e4 en n\u00e4in mutta kun niin voi"),
+    "id": ("", "yang dan di ini itu tidak untuk dengan dari saya kamu ada"),
+    "ms": ("", "yang dan di ini itu tidak untuk dengan dari saya awak ada"),
+    "vi": ("\u01b0\u01a1\u0111\u0103\u00e2\u00ea\u00f4",
+           "khong la co cua toi nguoi va duoc mot nay cho"),
+    "az": ("\u0259\u0131\u011f\u015f", "bir ve bu ile ucun amma deyil cox daha ne"),
+    "hr": ("\u0111\u010d\u0107\u017e\u0161", "je ne se to na da li ali kako "
+           "sto sam bi"),
+    "tl": ("", "ang ng sa na ay mga ko po hindi ito para may"),
+    "sw": ("", "na ya wa kwa ni katika hii yake sana kama lakini"),
+    "af": ("", "die en van is nie het wat vir met om ook maar"),
+    # --- Cyrillic script --------------------------------------------------
+    "ru": ("\u044d\u044a\u044b", "\u0438 \u0432 \u043d\u0435 \u043d\u0430 "
+           "\u044f \u0447\u0442\u043e \u043e\u043d \u0441 \u043a\u0430\u043a "
+           "\u044d\u0442\u043e \u0442\u044b \u043c\u044b"),
+    "uk": ("\u0456\u0457\u0454\u0491", "\u0456 \u0432 \u043d\u0435 "
+           "\u043d\u0430 \u044f \u0449\u043e \u0432\u0456\u043d "
+           "\u0437 \u044f\u043a \u0446\u0435 \u0442\u0438"),
+    "bg": ("\u044a", "\u0438 \u0432 \u043d\u0435 \u043d\u0430 \u0430\u0437 "
+           "\u0447\u0435 \u0442\u043e\u0439 \u0441\u044a\u0441 "
+           "\u043a\u0430\u043a \u0442\u043e\u0432\u0430"),
+    "sr": ("\u0452\u0459\u045a\u045b\u045f", "\u0438 \u0443 \u043d\u0435 "
+           "\u043d\u0430 \u0458\u0430 \u0434\u0430 \u043e\u043d "
+           "\u0441\u0430 \u043a\u0430\u043a\u043e \u0442\u043e"),
+    "mk": ("\u0453\u045c\u0455", "\u0438 \u0432\u043e \u043d\u0435 "
+           "\u043d\u0430 \u0458\u0430\u0441 \u0434\u0430 \u0442\u043e\u0458 "
+           "\u0441\u043e \u043a\u0430\u043a\u043e"),
+    # --- Arabic script ----------------------------------------------------
+    "ar": ("\u0629", "\u0641\u064a \u0645\u0646 \u0639\u0644\u0649 "
+           "\u0623\u0646 \u0644\u0627 \u0645\u0627 \u0647\u0630\u0627 "
+           "\u0627\u0644\u0649 \u0647\u0644 \u0642\u062f"),
+    "fa": ("\u067e\u0686\u0698\u06af\u06cc\u06a9",
+           "\u0648 \u062f\u0631 \u0628\u0647 \u0627\u0632 "
+           "\u06a9\u0647 \u0627\u06cc\u0646 \u0628\u0627 "
+           "\u0631\u0627 \u0645\u0646"),
+    "ur": ("\u0679\u0688\u0691\u06ba\u06d2\u06c1",
+           "\u06a9\u06d2 \u06a9\u06cc \u06a9\u0627 \u0645\u06cc\u06ba "
+           "\u06c1\u06d2 \u0633\u06d2 \u0646\u06c1 \u06c1\u0648"),
+}
+
+
+_HINT_RIVALS = {}
+for _l in _LANG_HINTS:
+    _sc = _LANG_SCRIPTS.get(_l)
+    if _sc:
+        _HINT_RIVALS.setdefault(_sc[0], []).append(_l)
+
+
+def _hint_score(text, lang):
+    """Weak evidence that `text` is written in `lang`.
+
+    Distinctive letters are weighted double, as a letter unique to one
+    language is stronger evidence than a single shared function word.
+    """
+    hint = _LANG_HINTS.get(lang)
+    if not hint:
+        return 0
+    chars, words = hint
+    score = 0
+    lowered = text.lower()
+    if chars:
+        score += 2 * sum(1 for c in set(chars) if c in lowered)
+    wordset = set(words.split())
+    if wordset:
+        score += sum(1 for w in word_keys(text) if w in wordset)
+    return score
+
+
+class LanguageFilter:
+    """Optional single-language mode.
+
+    When a language code is set, only lines whose dominant script matches
+    that language are kept -- so an Arabic-subtitled video stops reading a
+    Latin channel logo or English credits. Lines with no letters at all
+    (numbers, symbols) are left alone for the noise filter to judge.
+    Unset/unknown code = keep everything, exactly as before.
+    """
+
+    def __init__(self, code):
+        self.code = (code or "").strip()
+        primary = self.code.replace("_", "-").split("-")[0].lower()
+        self.primary = primary
+        self.scripts = _LANG_SCRIPTS.get(primary)
+        self.active = bool(self.scripts)
+        # A code was supplied but is not recognised. Remain inactive
+        # rather than filtering everything, and let the caller report.
+        self.unknown = bool(self.code) and not self.active
+
+    def wrong_language(self, line):
+        if not self.active:
+            return False
+        counts = script_histogram(line)
+        if not counts:
+            return False          # no letters: not ours to judge
+        total = sum(counts.values())
+        mine = sum(counts.get(s, 0) for s in self.scripts)
+        if mine * 2 <= total:
+            return True           # different alphabet: certain
+        return self._wrong_same_script(line)
+
+    def _wrong_same_script(self, line):
+        """Second pass for languages that share the target alphabet.
+
+        Discards a line only when another language scores clearly
+        higher than the selected one. Short, neutral or ambiguous
+        lines are kept."""
+        if self.primary not in _LANG_HINTS:
+            return False
+        rivals = _HINT_RIVALS.get(self.scripts[0], ())
+        if len(word_keys(line)) < MIN_WORDS_FOR_LANG_HINT:
+            return False          # too short to judge
+        mine = _hint_score(line, self.primary)
+        best_other = 0
+        for other in rivals:
+            if other == self.primary:
+                continue
+            best_other = max(best_other, _hint_score(line, other))
+        return (best_other >= MIN_HINT_EVIDENCE
+                and best_other >= mine + HINT_MARGIN)
+
+    def filter_lines(self, lines):
+        kept, dropped = [], []
+        for ln in lines:
+            (dropped if self.wrong_language(ln) else kept).append(ln)
+        return kept, dropped
 
 
 def word_keys(s):
@@ -146,17 +482,24 @@ class NoiseFilter:
         self.errors = []       # (rule_text, error_message)
         self._literals = set()
         self._patterns = []    # compiled regex objects
+        self._builtins = set()  # internal markers, e.g. no_letters
         for raw in rules:
             rule = raw.strip()
             if not rule:
+                continue
+            if rule.lower().startswith("builtin:"):
+                self._builtins.add(rule[len("builtin:"):].strip())
                 continue
             if rule.lower().startswith("regex:"):
                 pattern_src = rule[len("regex:"):].strip()
                 if not pattern_src:
                     continue
                 try:
-                    self._patterns.append(re.compile(
-                        pattern_src, re.IGNORECASE))
+                    # Case-sensitive by design: a rule that specifies a
+                    # letter case is about case, so ignoring case would
+                    # widen it to match text it was never meant to.
+                    # Plain-text phrases remain case-insensitive below.
+                    self._patterns.append(re.compile(pattern_src))
                 except re.error as e:
                     self.errors.append((raw, str(e)))
             else:
@@ -167,6 +510,8 @@ class NoiseFilter:
         if not text:
             return False
         if text.lower() in self._literals:
+            return True
+        if "no_letters" in self._builtins and letter_count(text) < 2:
             return True
         for pat in self._patterns:
             try:
@@ -198,8 +543,11 @@ BUILTIN_NOISE_PATTERNS = {
         "rule": r"regex:^(skip ad|skip in \d+s?|skip ads?)$",
     },
     "no_real_words": {
-        "rule": (r"regex:^(?!.*[a-zA-Z\u0600-\u06FF\u0400-\u04FF]"
-                r"{3,}).*$"),
+        # Matches a line with too few letters to form a word, in any
+        # writing system. Expressed as a marker resolved inside the
+        # filter, because a plain regex would need every alphabet
+        # listed explicitly.
+        "rule": "builtin:no_letters",
     },
 }
 
@@ -237,23 +585,55 @@ class SubtitleTracker:
         self.stable_frames = stable_frames or STABLE_FRAMES
         self.similarity = similarity or SIMILARITY_THRESHOLD
         self.repeat_window = repeat_window or REPEAT_WINDOW
-        # pending: key -> [consecutive polls seen, best reading]
+        # pending: key -> [polls seen, best reading, last-seen scan]
         self.pending = {}
+        self._scan = 0
+        # key -> set of keys proven distinct from it by co-visibility
+        self._distinct = {}
         # spoken: key -> (last seen-or-spoken time, display text)
         self.spoken = {}
 
     # -- internals ---------------------------------------------------------
 
-    def _find_spoken_match(self, k):
-        if k in self.spoken:
+    def _find_spoken_match(self, k, exclude=()):
+        """Fuzzy-match against previously spoken lines.
+
+        `exclude` holds lines spoken during the current scan. Those
+        belong to the same subtitle and are displayed at the same
+        moment, so they must not suppress one another regardless of
+        how similar they appear."""
+        if k in self.spoken and k not in exclude:
             return k
         for s in self.spoken:
+            if s in exclude or self._known_distinct(k, s):
+                continue
             if similar(k, s) >= self.similarity:
                 return s
         return None
 
-    def _find_pending_match(self, k):
+    def _known_distinct(self, a, b):
+        """True if a and b have been displayed simultaneously."""
+        return b in self._distinct.get(a, ())
+
+    def _note_covisible(self, keys):
+        """Record that these lines were displayed together, so they
+        are not later treated as variant readings of one line."""
+        for a in keys:
+            bucket = self._distinct.setdefault(a, set())
+            for b in keys:
+                if a != b:
+                    bucket.add(b)
+
+    def _find_pending_match(self, k, exclude=()):
+        """Fuzzy-match against candidates from earlier scans only.
+
+        Lines visible in the same scan belong to one subtitle and are
+        displayed simultaneously, so they cannot be variant readings
+        of each other. Matching them would merge a similar pair into a
+        single utterance and drop a line."""
         for p in self.pending:
+            if p in exclude or self._known_distinct(k, p):
+                continue
             if similar(k, p) >= self.similarity:
                 return p
         return None
@@ -281,28 +661,37 @@ class SubtitleTracker:
 
     def update(self, lines, now):
         out = []
+        self._scan += 1
         matched_pending = set()
+        spoken_now = set()   # lines emitted during THIS scan
+        scan_keys = []
+        for _raw in lines:
+            _n = normalize(_raw)
+            if _n:
+                scan_keys.append(_n.lower())
+        if len(scan_keys) > 1:
+            self._note_covisible(scan_keys)
         for raw in lines:
             ln = normalize(raw)
             if not ln:
                 continue
             k = ln.lower()
 
-            # 1) Already spoken and still visible (or a jitter variant):
+            # 1) Already spoken and still visible (or a variant read):
             #    refresh suppression. Exception: strictly more words may be
             #    a genuine continuation -> let it reach the stability gate.
-            m = self._find_spoken_match(k)
+            m = self._find_spoken_match(k, exclude=spoken_now)
             if m is not None and (
                     len(word_keys(ln)) <= len(word_keys(self.spoken[m][1]))):
                 self.spoken[m] = (now, self.spoken[m][1])
                 continue
 
             # 2) FUZZY stability gate: similar readings on consecutive
-            #    polls accumulate (moving video jitters OCR output;
+            #    polls accumulate (motion varies recognition output;
             #    requiring exact repeats silences whole subtitles).
-            pk = self._find_pending_match(k)
+            pk = self._find_pending_match(k, exclude=matched_pending)
             if pk is None:
-                self.pending[k] = [1, ln]
+                self.pending[k] = [1, ln, self._scan]
                 matched_pending.add(k)
                 if self.stable_frames > 1:
                     continue
@@ -310,8 +699,10 @@ class SubtitleTracker:
             else:
                 entry = self.pending[pk]
                 entry[0] += 1
+                entry[2] = self._scan
                 # keep the longer reading; ties keep the earlier one
-                # (fade-out garbage tends to arrive after the good read)
+                # (partial reads during fade-out arrive after the
+                # complete one)
                 if len(ln) > len(entry[1]):
                     entry[1] = ln
                 matched_pending.add(pk)
@@ -322,7 +713,7 @@ class SubtitleTracker:
             best = self.pending.pop(pk)[1]
             matched_pending.discard(pk)
             bk = best.lower()
-            m = self._find_spoken_match(bk)
+            m = self._find_spoken_match(bk, exclude=spoken_now)
             if m is not None and (
                     len(word_keys(best)) <= len(word_keys(self.spoken[m][1]))):
                 self.spoken[m] = (now, self.spoken[m][1])
@@ -332,15 +723,23 @@ class SubtitleTracker:
                 sk, suffix = ext
                 del self.spoken[sk]
                 self.spoken[bk] = (now, best)
+                spoken_now.add(bk)
                 if suffix:
                     out.append(("suffix", suffix))
             else:
                 self.spoken[bk] = (now, best)
+                spoken_now.add(bk)
                 out.append(("line", best))
 
-        # 4) Pending candidates not seen (even fuzzily) this poll vanished.
+        # 4) Discard candidates absent for longer than the grace window.
+        #    A single missed scan no longer resets a line to zero:
+        #    recognition may intermittently omit one line of a
+        #    multi-line subtitle, which would otherwise prevent that
+        #    line from ever reaching the stability threshold. One scan
+        #    of grace allows for this while still requiring two
+        #    sightings, so single-frame misreads are not admitted.
         for k in list(self.pending):
-            if k not in matched_pending:
+            if self._scan - self.pending[k][2] > PENDING_GRACE_SCANS:
                 del self.pending[k]
 
         # 5) Suppression expires only after a line has been GONE for
@@ -348,6 +747,15 @@ class SubtitleTracker:
         for k in list(self.spoken):
             if now - self.spoken[k][0] > self.repeat_window:
                 del self.spoken[k]
+
+        # 6) Forget co-visibility for lines that are no longer live,
+        #    so the memory cannot grow without bound.
+        live = set(self.pending) | set(self.spoken)
+        for k in list(self._distinct):
+            if k not in live:
+                del self._distinct[k]
+            else:
+                self._distinct[k] &= live
 
         return out
 
@@ -492,7 +900,7 @@ def capture_locked_window(hwnd):
             all_screens=True)
     # Occluded/background: ask the window to render its own contents
     # (PrintWindow with PW_RENDERFULLCONTENT). Works for most apps; some
-    # video pipelines return a blank frame, which we treat as failure.
+    # video pipelines return a blank frame, which is treated as failure.
     hdc_win = user32.GetWindowDC(hwnd)
     if not hdc_win:
         return None
@@ -569,7 +977,7 @@ def safe_image(img):
 
 
 def watch_stdin():
-    """Exit when the parent (NVDA) closes our stdin."""
+    """Exit when the parent process (NVDA) closes stdin."""
     try:
         sys.stdin.read()
     except Exception:
@@ -580,7 +988,7 @@ def watch_stdin():
 
 def parse_args():
     global POLL_INTERVAL, REGION_FRACTION, STABLE_FRAMES
-    global REPEAT_WINDOW, OCR_LANG
+    global REPEAT_WINDOW, OCR_LANG, LANG_FILTER_ON
     import argparse
     p = argparse.ArgumentParser()
     p.add_argument("--interval", type=float, default=POLL_INTERVAL)
@@ -588,6 +996,8 @@ def parse_args():
     p.add_argument("--stable", type=int, default=STABLE_FRAMES)
     p.add_argument("--window", type=float, default=REPEAT_WINDOW)
     p.add_argument("--lang", type=str, default=OCR_LANG)
+    p.add_argument("--only-lang", action="store_true",
+                   help="speak only lines written in --lang")
     p.add_argument("--hwnd", type=int, default=0)
     p.add_argument("--filters-b64", type=str, default="")
     a = p.parse_args()
@@ -608,10 +1018,12 @@ def parse_args():
     STABLE_FRAMES = max(1, min(5, a.stable))
     REPEAT_WINDOW = max(2.0, min(60.0, a.window))
     OCR_LANG = a.lang
+    LANG_FILTER_ON = a.only_lang
 
 
 def main():
     noise_filter = parse_args()
+    lang_filter = LanguageFilter(OCR_LANG if LANG_FILTER_ON else "")
     threading.Thread(target=watch_stdin, daemon=True).start()
 
     try:
@@ -633,6 +1045,13 @@ def main():
                          f"Details: {e}"})
         sys.exit(1)
 
+    if lang_filter.unknown:
+        log(f"Unrecognised language code {lang_filter.code!r}; "
+            "reading all languages")
+        emit({"type": "filter_warning",
+              "message": f"Language code '{lang_filter.code}' was "
+                         "not recognised. All languages will be "
+                         "read."})
     if noise_filter.errors:
         bad = "; ".join(f"'{r}': {e}" for r, e in noise_filter.errors[:3])
         log(f"Ignored invalid filter rule(s): {bad}")
@@ -675,6 +1094,9 @@ def main():
                 lines = [fix_rtl_leading_punct(ln)
                          for ln in raw.split("\n") if ln.strip()]
                 lines, dropped = noise_filter.filter_lines(lines)
+                lines, wrong_lang = lang_filter.filter_lines(lines)
+                for ln in wrong_lang:
+                    log("Filtered as other language: %r" % ln)
                 for d in dropped:
                     log(f"Filtered as noise: {d!r}")
             consecutive_failures = 0

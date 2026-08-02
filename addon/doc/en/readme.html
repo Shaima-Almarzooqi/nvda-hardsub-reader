@@ -59,9 +59,26 @@ flickers or stays on screen.</li>
 <li><strong>Stop reading the previous subtitle when a new one
 appears</strong>: keeps speech in sync with fast dialogue; turn it off
 if you prefer every line read to the end.</li>
-<li><strong>Subtitle language code</strong>: used only by the fallback
+<li><strong>Subtitle language code</strong>: used by the fallback
 engine on systems without OneOCR; the high-accuracy engine detects
 languages automatically.</li>
+
+<li><strong>Read only subtitles in this language</strong>: when
+ticked, lines written in a different alphabet are skipped. Useful
+for videos that mix languages, so a channel logo or credits in
+another language are not read out. Type a code such as
+<code>ar</code>, <code>en</code> or <code>ja</code> in the language
+box above; capitals and regional forms such as <code>ar-SA</code>
+also work. If a code is not recognised, every language is read and
+a message says so. Leave the box unticked to read every language on
+screen, which is the default.
+<br>Languages written in different alphabets, for example Greek and
+English, are separated reliably. Languages that share an alphabet,
+for example Spanish and English, are told apart using common words
+and letters: a longer line is usually identified correctly, while a
+short one may still be read even if it is in another language. This
+is intentional, so that dialogue is never silenced by an uncertain
+guess.</li>
 
 <li><strong>Text to never read aloud</strong>: a checklist of common noise (bare timestamps, short ALL-CAPS watermarks, "Skip Ad" prompts, symbol-only misreads) plus a box for your own phrases, one per line. A typed phrase is filtered only when it exactly matches a whole subtitle line, so it will not accidentally remove dialogue that merely contains the same words. Starting a line with <code>regex:</code> uses a regular expression instead of literal text, for advanced patterns.</li>
 </ul>

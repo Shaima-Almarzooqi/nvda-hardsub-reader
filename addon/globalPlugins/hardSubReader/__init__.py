@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# HardSub Reader v1.0: NVDA global plugin
+# HardSub Reader: NVDA global plugin
 # Speaks hardcoded (burned-in) video subtitles using the Windows 11
 # OneOCR engine (or legacy Windows OCR as fallback) running in an
 # external sidecar process.
@@ -118,6 +118,7 @@ config.conf.spec[CONF_SECTION] = {
     "repeatWindow": "integer(default=8, min=2, max=60)",
     "interrupt": "boolean(default=True)",
     "ocrLanguage": "string(default='en')",
+    "onlyLanguage": "boolean(default=False)",
     "preferredHelper": "string(default='')",
     "engineSetupOffered": "boolean(default=False)",
     "noiseFilterText": "string(default='')",
@@ -284,12 +285,18 @@ class HardSubReaderSettingsPanel(SettingsPanel):
                           "previous one and read the new one right away")))
         self.interruptCtrl.SetValue(getConf("interrupt"))
 
-        # Translators: label for the fallback OCR language field.
+        # Translators: label for the subtitle language field.
         self.langCtrl = helper.addLabeledControl(
-            _("Subtitle language code, used only when the high-accuracy "
-              "engine is unavailable (for example en, ar, tr):"),
+            _("Subtitle language code (for example en, ar, ja):"),
             wx.TextCtrl)
         self.langCtrl.SetValue(getConf("ocrLanguage"))
+
+        # Translators: checkbox to restrict reading to one language.
+        self.onlyLangCtrl = helper.addItem(wx.CheckBox(self, label=_(
+            "Read only subtitles in this language. Useful for videos "
+            "that mix languages, to skip logos and credits in "
+            "another one")))
+        self.onlyLangCtrl.SetValue(getConf("onlyLanguage"))
 
         # Translators: heading above the noise-filter controls.
         helper.addItem(wx.StaticText(self, label=_(
@@ -379,6 +386,7 @@ class HardSubReaderSettingsPanel(SettingsPanel):
         c["repeatWindow"] = self.windowCtrl.GetValue()
         c["interrupt"] = self.interruptCtrl.GetValue()
         c["ocrLanguage"] = self.langCtrl.GetValue().strip() or "en"
+        c["onlyLanguage"] = self.onlyLangCtrl.GetValue()
 
         checked = [key for key, cb in self.builtinCtrls if cb.GetValue()]
         c["noiseFilterBuiltins"] = ",".join(checked)
@@ -542,6 +550,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             "--stable", str(getConf("stableFrames")),
             "--window", str(getConf("repeatWindow")),
             "--lang", getConf("ocrLanguage"),
+        ]
+        if getConf("onlyLanguage"):
+            args += ["--only-lang"]
+        args += [
             "--hwnd", str(self._lockHwnd or 0),
         ]
         rules = self._noiseFilterRules()

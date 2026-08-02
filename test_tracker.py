@@ -53,7 +53,7 @@ texts = [x[1] for x in ev]
 check("jitter accumulates (no silence)",
       sum(1 for x in texts if "storm" in x.lower()) == 1, ev)
 
-# 3. One-frame fade garbage after a spoken line stays silent
+# 3. A single-frame misread following a spoken line stays silent
 ev = run([(3, ["The truth was buried with him."]),
           (1, ["Tne trutl was buriecl witl hin,"]),
           (2, [])])
@@ -176,6 +176,138 @@ check("filter_lines collects dropped lines", dropped == ["NOISE"], dropped)
 for key, info in mod.BUILTIN_NOISE_PATTERNS.items():
     rule = info["rule"]
     check(f"builtin '{key}' rule is well-formed",
-          rule.startswith("regex:") and mod.NoiseFilter([rule]).errors == [])
+          (rule.startswith("regex:") or rule.startswith("builtin:"))
+          and mod.NoiseFilter([rule]).errors == [])
+
+# 20. Two lines of ONE subtitle must never merge, however similar.
+#     Two similar lines displayed together must produce two utterances.
+a = "- come here"
+b = "- come here?"
+tr = mod.SubtitleTracker()
+out = tr.update([a, b], 0.0) + tr.update([a, b], 0.3)
+check("co-visible similar lines stay separate", len(out) == 2, out)
+
+# 21. A line OCR misses for a single scan must still be spoken.
+#     A single missed frame must not reset the stability counter.
+top, bot = "top line of subtitle", "bottom line of subtitle"
+tr = mod.SubtitleTracker()
+got = []
+for scan in ([top, bot], [bot], [top, bot], [top, bot]):
+    got += tr.update(scan, 0.0)
+check("line survives one missed scan",
+      any(top in t for _k, t in got), got)
+
+# 22. A single-frame misread must still be rejected.
+tr = mod.SubtitleTracker()
+got = []
+for scan in (["steady line"], ["steady line", "XQZ"], ["steady line"],
+             ["steady line"], ["steady line"]):
+    got += tr.update(scan, 0.0)
+check("single-frame garbage still rejected",
+      not any("XQZ" in t for _k, t in got), got)
+
+# 23. Built-in filters must not remove dialogue in any writing system.
+nfb = mod.NoiseFilter([i["rule"] for i in
+                       mod.BUILTIN_NOISE_PATTERNS.values()])
+for phrase in ["wait for me now", "Alexander", "Hello?", "Wait.",
+               "\u0623\u0647\u0644\u0627!", "\u0643\u062a\u0627\u0628 \u062c\u062f\u064a\u062f"]:
+    check(f"builtins keep dialogue {phrase!r}",
+          not nfb.is_noise(phrase))
+
+# 24. On-screen text that is not dialogue is still removed.
+for junk in ["CHANNEL NAME", "STUDIO", "12:34", "0:15 / 1:00:00",
+             "S", "D", "0", "..."]:
+    check(f"builtins drop noise {junk!r}", nfb.is_noise(junk))
+
+# 25. Regex rules are case-SENSITIVE; plain phrases are not.
+nfc = mod.NoiseFilter([r"regex:^[A-Z]{3,}$", "hello there"])
+check("regex rule respects case", nfc.is_noise("ABC")
+      and not nfc.is_noise("abc"))
+check("plain phrase ignores case", nfc.is_noise("Hello There"))
+
+# 26. Language filter: keeps the chosen script, drops the rest,
+#     and is inert when unset. Checked across several scripts.
+lang_cases = [
+    ("ar", "\u0645\u0631\u062d\u0628\u0627 \u0628\u0643", False),
+    ("ar", "CHANNEL NAME", True),
+    ("ja", "\u3053\u3093\u306b\u3061\u306f", False),
+    ("ja", "Forward World", True),
+    ("ko", "\uc548\ub155\ud558\uc138\uc694", False),
+    ("th", "\u0E2A\u0E27\u0E31\u0E2A", False),
+    ("ta", "\u0BB5\u0BA3\u0B95\u0BCD\u0B95\u0BAE\u0BCD", False),
+    ("ru", "\u041F\u0440\u0438\u0432\u0435\u0442", False),
+    ("en", "Hello there", False),
+    ("en", "\u0645\u0631\u062d\u0628\u0627 \u0628\u0643", True),
+    ("en-US", "Hello", False),
+    ("", "\u0645\u0631\u062d\u0628\u0627 \u0628\u0643", False),
+    ("zz", "anything at all", False),
+]
+for code, line, want in lang_cases:
+    check(f"lang {code!r} vs {line[:10]!r}",
+          mod.LanguageFilter(code).wrong_language(line) == want)
+
+# 27. Language coverage is not a hand-picked shortlist: every ISO
+#     639-1 code resolves, a script name may be typed directly, and
+#     an unknown code stays inert rather than muting everything.
+iso6391 = ("aa ab af ak am ar as av ay az ba be bg bh bi bm bn bo br "
+           "bs ca ce ch co cr cs cu cv cy da de dv dz ee el en eo es "
+           "et eu fa ff fi fj fo fr fy ga gd gl gn gu gv ha he hi ho "
+           "hr ht hu hy hz ia id ie ig ii ik io is it iu ja jv ka kg "
+           "ki kj kk kl km kn ko kr ks ku kv kw ky la lb lg li ln lo "
+           "lt lu lv mg mh mi mk ml mn mr ms mt my na nb nd ne ng nl "
+           "nn no nr nv ny oc oj om or os pa pi pl ps pt qu rm rn ro "
+           "ru rw sa sc sd se sg si sk sl sm sn so sq sr ss st su sv "
+           "sw ta te tg th ti tk tl tn to tr ts tt tw ty ug uk ur uz "
+           "ve vi vo wa wo xh yi yo za zh zu").split()
+unresolved = [c for c in iso6391 if not mod.LanguageFilter(c).active]
+check(f"every ISO 639-1 code resolves ({len(iso6391)} codes)",
+      unresolved == [], unresolved)
+check("script name accepted directly",
+      mod.LanguageFilter("arabic").active
+      and mod.LanguageFilter("japanese").active)
+check("unknown code stays inert and is flagged",
+      mod.LanguageFilter("zz").unknown
+      and not mod.LanguageFilter("zz").wrong_language("anything"))
+check("empty code is not flagged as unknown",
+      not mod.LanguageFilter("").unknown)
+check("uppercase and regional forms work",
+      mod.LanguageFilter("AR").active
+      and mod.LanguageFilter("ar-SA").active
+      and mod.LanguageFilter("en_US").active)
+
+# 28. Same-script languages: only dropped on positive evidence.
+same_script = [
+    ("tr", "bu bir kelime dizisi", False),
+    ("tr", "Arkadaslar bu bir sey degil", False),
+    ("tr", "The end of the story is that you have not", True),
+    ("tr", "Directed by someone and produced with care", True),
+    ("en", "The quick brown fox is not here", False),
+    ("en", "Bu bir sey degil ve daha cok var", True),
+    ("ru", "\u044f \u043d\u0435 \u0437\u043d\u0430\u044e "
+           "\u0447\u0442\u043e \u044d\u0442\u043e", False),
+    ("ru", "\u044f \u043d\u0435 \u0437\u043d\u0430\u044e "
+           "\u0449\u043e \u0446\u0435 \u0457\u0457", True),
+    ("ar", "\u0641\u064a \u0645\u0646 \u0639\u0644\u0649 "
+           "\u0623\u0646 \u0644\u0627", False),
+    ("ar", "\u0648 \u062f\u0631 \u0628\u0647 \u0627\u0632 "
+           "\u06a9\u0647 \u0627\u06cc\u0646 \u06af", True),
+]
+for code, line, want in same_script:
+    check(f"same-script {code!r} vs {line[:16]!r}",
+          mod.LanguageFilter(code).wrong_language(line) == want)
+
+# 29. Short or neutral same-script lines are ALWAYS kept: never
+#     lose dialogue to a guess.
+for line in ["Subscribe", "Istanbul", "Ankara 2024", "OK", "Hello"]:
+    check(f"short line kept under tr: {line!r}",
+          not mod.LanguageFilter("tr").wrong_language(line))
+
+# 30. A language with no hint data never drops same-script lines.
+check("language without hints is script-only",
+      not mod.LanguageFilter("la").wrong_language("Hello there friend"))
+
+# 31. Lines without letters are never judged by language.
+check("language filter ignores letterless lines",
+      not mod.LanguageFilter("ar").wrong_language("12:34"))
 
 print(f"\nAll {passed} tests passed against the real shipped module.")

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.0
+- Added an option to read only subtitles in one language, for
+  videos that mix languages. Type a language code such as ar, en
+  or ja and tick "Read only subtitles in this language" to skip
+  logos and credits written in another one.
+- Fixed a subtitle losing one of its lines when both lines looked
+  alike.
+- Fixed a line being skipped when recognition briefly missed it.
+- Fixed the built-in filters removing ordinary dialogue, short
+  words, and any subtitle written in an alphabet other than
+  Latin, Arabic or Cyrillic.
+
 ## 1.2.0
 - Added noise filtering: a list of phrases or patterns that are never
   read aloud. Choose from common built-in options (bare timestamps,
