@@ -52,6 +52,15 @@ For developers: `python build_addon.py` builds the package,
 workflow builds the self-contained helpers and assembles the complete
 release package.
 
+Contributions are welcome. If you would like to improve the add-on,
+pull requests and issue reports are both appreciated, whether that
+means fixing a bug, adding support for another language, improving
+recognition accuracy, or refining the documentation. Please run the
+test suite before opening a pull request, and add tests alongside
+any change to the subtitle-detection logic. If you are planning
+something substantial, opening an issue first to discuss the
+approach is helpful.
+
 ## License
 
 GNU General Public License v2. See `copying.txt`.

@@ -5,6 +5,8 @@ corruption or regression in the real file fails here immediately.
 Run: python test_tracker.py
 """
 import importlib.util
+import os
+import re
 import sys
 from pathlib import Path
 
@@ -309,5 +311,32 @@ check("language without hints is script-only",
 # 31. Lines without letters are never judged by language.
 check("language filter ignores letterless lines",
       not mod.LanguageFilter("ar").wrong_language("12:34"))
+
+# 32. The "Restore defaults" values must match the declared config
+#     defaults exactly, and must not touch engine bookkeeping.
+plugin_src = open(os.path.join(os.path.dirname(__file__), "addon",
+                               "globalPlugins", "hardSubReader",
+                               "__init__.py"), newline="").read()
+spec_defaults = dict(re.findall(
+    r'"(\w+)":\s*"(?:float|integer|boolean|string)\(default=([^,)]+)',
+    plugin_src))
+reset_block = re.search(r"RESETTABLE_DEFAULTS = \{(.*?)\n\}",
+                        plugin_src, re.S).group(1)
+reset_values = dict(re.findall(r'"(\w+)":\s*([^,\n]+),', reset_block))
+
+def _norm(v):
+    return str(v).strip().strip("'\"")
+
+mismatched = [k for k, v in reset_values.items()
+              if _norm(spec_defaults.get(k, "<absent>")) != _norm(v)]
+check("restore-defaults values match the config spec",
+      mismatched == [], mismatched)
+check("restore-defaults leaves engine bookkeeping alone",
+      "preferredHelper" not in reset_values
+      and "engineSetupOffered" not in reset_values)
+check("every user setting is resettable",
+      set(spec_defaults) - set(reset_values)
+      == {"preferredHelper", "engineSetupOffered"},
+      sorted(set(spec_defaults) - set(reset_values)))
 
 print(f"\nAll {passed} tests passed against the real shipped module.")

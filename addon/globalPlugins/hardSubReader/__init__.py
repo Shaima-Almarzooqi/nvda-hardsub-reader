@@ -111,6 +111,22 @@ RESTART_WINDOW_SECS = 120
 RESTART_DELAY_SECS = 1.0
 
 CONF_SECTION = "hardSubReader"
+
+# Settings the "Restore defaults" button resets. Engine bookkeeping
+# (preferredHelper, engineSetupOffered) is deliberately excluded:
+# clearing it would repeat the engine setup prompt and the helper
+# architecture search, which are not user preferences.
+RESETTABLE_DEFAULTS = {
+    "pollInterval": 0.3,
+    "regionPercent": 30,
+    "stableFrames": 2,
+    "repeatWindow": 8,
+    "interrupt": True,
+    "ocrLanguage": "en",
+    "onlyLanguage": False,
+    "noiseFilterText": "",
+    "noiseFilterBuiltins": "",
+}
 config.conf.spec[CONF_SECTION] = {
     "pollInterval": "float(default=0.3, min=0.1, max=2.0)",
     "regionPercent": "integer(default=30, min=10, max=100)",
@@ -287,7 +303,9 @@ class HardSubReaderSettingsPanel(SettingsPanel):
 
         # Translators: label for the subtitle language field.
         self.langCtrl = helper.addLabeledControl(
-            _("Subtitle language code (for example en, ar, ja):"),
+            _("Subtitle language code (for example en, ar, ja). "
+              "Used by the fallback engine, and by the option "
+              "below:"),
             wx.TextCtrl)
         self.langCtrl.SetValue(getConf("ocrLanguage"))
 
@@ -332,6 +350,40 @@ class HardSubReaderSettingsPanel(SettingsPanel):
             helper.addItem(wx.StaticText(self, label=_(
                 "The high-accuracy engine is already set up.")))
 
+        # Translators: button that restores the default settings.
+        self.resetBtn = wx.Button(self, label=_(
+            "Restore default settings"))
+        self.resetBtn.Bind(wx.EVT_BUTTON, self.onRestoreDefaults)
+        helper.addItem(self.resetBtn)
+
+
+    def onRestoreDefaults(self, event):
+        if gui.messageBox(
+                # Translators: confirmation before restoring defaults.
+                _("Restore all HardSub Reader settings on this page "
+                  "to their defaults? Your own list of text to never "
+                  "read aloud will be cleared."),
+                _("HardSub Reader"),
+                wx.YES | wx.NO | wx.ICON_QUESTION) != wx.YES:
+            return
+        d = RESETTABLE_DEFAULTS
+        self.speedCtrl.SetSelection(self._selectNearest(
+            self.SPEED_CHOICES, d["pollInterval"]))
+        self.areaCtrl.SetSelection(self._selectNearest(
+            self.AREA_CHOICES, d["regionPercent"]))
+        self.filterCtrl.SetSelection(self._selectNearest(
+            self.FILTER_CHOICES, d["stableFrames"]))
+        self.windowCtrl.SetValue(d["repeatWindow"])
+        self.interruptCtrl.SetValue(d["interrupt"])
+        self.langCtrl.SetValue(d["ocrLanguage"])
+        self.onlyLangCtrl.SetValue(d["onlyLanguage"])
+        for _key, cb in self.builtinCtrls:
+            cb.SetValue(False)
+        self.noiseTextCtrl.SetValue(d["noiseFilterText"])
+        # Translators: confirmation that defaults were restored.
+        ui.message(_("Default settings restored. Select OK to save "
+                     "them, or Cancel to keep your previous "
+                     "settings."))
 
     def onSetupEngine(self, event):
         if not snippingToolPresent():

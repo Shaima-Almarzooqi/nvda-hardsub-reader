@@ -8,6 +8,7 @@
 - Fixed a subtitle losing one of its lines when both lines looked
   alike.
 - Fixed a line being skipped when recognition briefly missed it.
+- Added a "Restore default settings" button to the settings panel.
 - Fixed the built-in filters removing ordinary dialogue, short
   words, and any subtitle written in an alphabet other than
   Latin, Arabic or Cyrillic.
