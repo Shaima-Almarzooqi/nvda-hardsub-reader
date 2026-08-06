@@ -56,6 +56,7 @@ SIMILARITY_THRESHOLD = 0.85
 REPEAT_WINDOW = 8.0
 OCR_LANG = "en"
 LANG_FILTER_ON = False
+DETAILED_LOG = False
 MIN_DIM = 64                 # pad captures below this size (DLL crash guard)
 
 _PUNCT = ".,!?;:\"'\u2026\u2019\u2018\u201c\u201d-\u2013\u2014()[]"
@@ -68,6 +69,16 @@ _PUNCT = ".,!?;:\"'\u2026\u2019\u2018\u201c\u201d-\u2013\u2014()[]"
 def log(msg):
     sys.stderr.write(time.strftime("%H:%M:%S ") + msg + "\n")
     sys.stderr.flush()
+
+
+def detail(msg):
+    """Write a line only when detailed logging is switched on.
+
+    Detailed logging records the text that was recognised, so it is
+    off by default and enabled per session from the settings panel.
+    """
+    if DETAILED_LOG:
+        log(msg)
 
 
 def emit(obj):
@@ -532,24 +543,9 @@ class NoiseFilter:
 # Built-in patterns for the settings-panel picker. Each key is a stable
 # identifier stored in config; label/description are shown to the user;
 # rule is what actually gets added to the filter list when checked.
-BUILTIN_NOISE_PATTERNS = {
-    "timestamps": {
-        "rule": r"regex:^\d{1,2}:\d{2}(:\d{2})?$",
-    },
-    "allcaps_short": {
-        "rule": r"regex:^[A-Z\s]{2,15}$",
-    },
-    "skip_ad": {
-        "rule": r"regex:^(skip ad|skip in \d+s?|skip ads?)$",
-    },
-    "no_real_words": {
-        # Matches a line with too few letters to form a word, in any
-        # writing system. Expressed as a marker resolved inside the
-        # filter, because a plain regex would need every alphabet
-        # listed explicitly.
-        "rule": "builtin:no_letters",
-    },
-}
+# Built-in filter rules are defined by the add-on and passed in at
+# start-up; the helper applies whatever it receives. Markers of
+# the form "builtin:<name>" are resolved by NoiseFilter.
 
 
 def batch_results(results):
@@ -988,7 +984,7 @@ def watch_stdin():
 
 def parse_args():
     global POLL_INTERVAL, REGION_FRACTION, STABLE_FRAMES
-    global REPEAT_WINDOW, OCR_LANG, LANG_FILTER_ON
+    global REPEAT_WINDOW, OCR_LANG, LANG_FILTER_ON, DETAILED_LOG
     import argparse
     p = argparse.ArgumentParser()
     p.add_argument("--interval", type=float, default=POLL_INTERVAL)
@@ -998,6 +994,8 @@ def parse_args():
     p.add_argument("--lang", type=str, default=OCR_LANG)
     p.add_argument("--only-lang", action="store_true",
                    help="speak only lines written in --lang")
+    p.add_argument("--detailed-log", action="store_true",
+                   help="record recognised text and decisions in the log")
     p.add_argument("--hwnd", type=int, default=0)
     p.add_argument("--filters-b64", type=str, default="")
     a = p.parse_args()
@@ -1019,6 +1017,7 @@ def parse_args():
     REPEAT_WINDOW = max(2.0, min(60.0, a.window))
     OCR_LANG = a.lang
     LANG_FILTER_ON = a.only_lang
+    DETAILED_LOG = a.detailed_log
 
 
 def main():
@@ -1061,12 +1060,16 @@ def main():
     emit({"type": "ready", "engine": engine_name})
     log(f"runtime: frozen={getattr(sys, 'frozen', False)} "
         f"machine={platform.machine()} exe={sys.executable}")
+    if DETAILED_LOG:
+        log("Detailed logging is on: recognised subtitle text is "
+            "recorded in this file.")
     log(f"Engine ready ({engine_name}); interval={POLL_INTERVAL}s "
         f"region={int(REGION_FRACTION*100)}% stable={STABLE_FRAMES} "
         f"window={REPEAT_WINDOW}s")
 
     tracker = SubtitleTracker()
     consecutive_failures = 0
+    quiet_scans = 0
 
     if LOCK_HWND:
         log(f"locked to window handle {LOCK_HWND}")
@@ -1085,12 +1088,25 @@ def main():
                     img = None  # minimized: nothing to read this frame
                 else:
                     img = capture_locked_window(LOCK_HWND)
+                    if img is None:
+                        detail("scan: the locked window returned no image")
             else:
                 region = get_capture_region()
                 img = ImageGrab.grab(bbox=region, all_screens=True)
             if img is not None:
                 img = safe_image(img)
                 raw = recognize(img)
+                if DETAILED_LOG:
+                    _found = [ln for ln in raw.split("\n") if ln.strip()]
+                    if _found:
+                        if quiet_scans:
+                            detail("scan: %d scans with no text"
+                                   % quiet_scans)
+                            quiet_scans = 0
+                        detail("scan: recognised %d line(s): %r"
+                               % (len(_found), _found))
+                    else:
+                        quiet_scans += 1
                 lines = [fix_rtl_leading_punct(ln)
                          for ln in raw.split("\n") if ln.strip()]
                 lines, dropped = noise_filter.filter_lines(lines)
@@ -1109,7 +1125,11 @@ def main():
 
         try:
             results = tracker.update(lines, time.time())
+            if results:
+                detail("tracker: %r" % (results,))
             for kind, text in batch_results(results):
+                detail("sent to screen reader: kind=%s text=%r"
+                       % (kind, text))
                 emit({"type": "subtitle", "kind": kind, "text": text})
         except Exception:
             # The tracker must never kill the process; log and continue.

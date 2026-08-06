@@ -175,8 +175,21 @@ check("filter_lines keeps good lines in order",
 check("filter_lines collects dropped lines", dropped == ["NOISE"], dropped)
 
 # 19. Built-in patterns registry sanity: every entry compiles
-for key, info in mod.BUILTIN_NOISE_PATTERNS.items():
-    rule = info["rule"]
+PLUGIN_SRC = open(os.path.join(os.path.dirname(__file__), "addon",
+                               "globalPlugins", "hardSubReader",
+                               "__init__.py"), newline="").read()
+
+# The rules the add-on actually passes to the helper. Parsed from
+# source so the tests cannot pass against a copy that production
+# does not use.
+BUILTIN_RULES = dict(
+    (k, r) for k, r in re.findall(
+        r'\("(\w+)",.*?(?:r?"((?:regex|builtin):[^"]*)")\),',
+        PLUGIN_SRC, re.S))
+check("built-in rules were found in the add-on source",
+      len(BUILTIN_RULES) == 4, sorted(BUILTIN_RULES))
+
+for key, rule in BUILTIN_RULES.items():
     check(f"builtin '{key}' rule is well-formed",
           (rule.startswith("regex:") or rule.startswith("builtin:"))
           and mod.NoiseFilter([rule]).errors == [])
@@ -209,8 +222,7 @@ check("single-frame garbage still rejected",
       not any("XQZ" in t for _k, t in got), got)
 
 # 23. Built-in filters must not remove dialogue in any writing system.
-nfb = mod.NoiseFilter([i["rule"] for i in
-                       mod.BUILTIN_NOISE_PATTERNS.values()])
+nfb = mod.NoiseFilter(list(BUILTIN_RULES.values()))
 for phrase in ["wait for me now", "Alexander", "Hello?", "Wait.",
                "\u0623\u0647\u0644\u0627!", "\u0643\u062a\u0627\u0628 \u062c\u062f\u064a\u062f"]:
     check(f"builtins keep dialogue {phrase!r}",
@@ -338,5 +350,38 @@ check("every user setting is resettable",
       set(spec_defaults) - set(reset_values)
       == {"preferredHelper", "engineSetupOffered"},
       sorted(set(spec_defaults) - set(reset_values)))
+
+# 33. The rules the add-on sends must not remove short words or text
+#     in writing systems that use no Latin, Arabic or Cyrillic
+#     letters. Checked against the add-on source, not a copy.
+live = mod.NoiseFilter(list(BUILTIN_RULES.values()))
+for sample in ["\u0645\u0627 \u0647\u0648 \u061F",
+               "\u3053\u3093\u306b\u3061\u306f",
+               "\u0BB5\u0BA3\u0B95\u0BCD\u0B95\u0BAE\u0BCD",
+               "\uc548\ub155\ud558\uc138\uc694",
+               "\u0E2A\u0E27\u0E31\u0E2A\u0E14\u0E35",
+               "\u0393\u03b5\u03b9\u03ac \u03c3\u03bf\u03c5"]:
+    check(f"live rules keep {sample[:8]!r}", not live.is_noise(sample))
+
+check("live rules still remove non-dialogue text",
+      live.is_noise("CHANNEL NAME") and live.is_noise("12:34")
+      and live.is_noise("S"))
+
+# 33. The rules the add-on sends must keep dialogue and remove
+#     non-dialogue, in every writing system. These use the rules
+#     parsed from the add-on source, not a copy.
+shipped = mod.NoiseFilter(list(BUILTIN_RULES.values()))
+for phrase in ["\u0645\u0627 \u0647\u0648 \u061F",
+               "\u3053\u3093\u306b\u3061\u306f",
+               "\u0BB5\u0BA3\u0B95\u0BCD\u0B95\u0BAE\u0BCD",
+               "\u0623\u0647\u0644\u0627!",
+               "wait for me now", "Alexander", "Hello?"]:
+    check(f"shipped rules keep dialogue {phrase!r}",
+          not shipped.is_noise(phrase))
+for junk in ["CHANNEL NAME", "STUDIO", "12:34", "S", "...",
+             "0:15 / 1:00:00"]:
+    check(f"shipped rules remove {junk!r}", shipped.is_noise(junk))
+check("no shipped rule fails to compile", shipped.errors == [],
+      shipped.errors)
 
 print(f"\nAll {passed} tests passed against the real shipped module.")

@@ -9,6 +9,8 @@
   alike.
 - Fixed a line being skipped when recognition briefly missed it.
 - Added a "Restore default settings" button to the settings panel.
+- Added an optional detailed diagnostic log, off by default, for use
+  when reporting a problem.
 - Fixed the built-in filters removing ordinary dialogue, short
   words, and any subtitle written in an alphabet other than
   Latin, Arabic or Cyrillic.

@@ -12,7 +12,9 @@ high-accuracy OneOCR engine built into Windows 11, with an automatic
 fallback engine on Windows 10. Everything runs locally on your computer:
 no internet connection is used and nothing is sent anywhere. The only
 file the add-on writes is a small troubleshooting log in your temporary
-folder, which never contains subtitle text or screen content.
+folder. It does not contain subtitle text or screen content unless you
+turn on detailed logging in the settings, which is off by default and
+intended for investigating a problem.
 
 ## Installation
 

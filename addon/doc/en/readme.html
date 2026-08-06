@@ -82,6 +82,14 @@ guess.</li>
 
 <li><strong>Text to never read aloud</strong>: a checklist of common noise (bare timestamps, short ALL-CAPS watermarks, "Skip Ad" prompts, symbol-only misreads) plus a box for your own phrases, one per line. A typed phrase is filtered only when it exactly matches a whole subtitle line, so it will not accidentally remove dialogue that merely contains the same words. Starting a line with <code>regex:</code> uses a regular expression instead of literal text, for advanced patterns.</li>
 
+<li><strong>Save a detailed diagnostic log</strong>: off by default.
+When switched on, the add-on records what the recognition engine read,
+what it decided to speak, and what it skipped, in
+<code>%TEMP%\hardSubReader_sidecar.log</code>. This includes the text
+of the subtitles themselves, so leave it off unless you are
+investigating a problem or preparing a bug report. The file is started
+again once it grows past a few megabytes.</li>
+
 <li><strong>Restore default settings</strong>: returns every setting on
 this page to how it arrived, including clearing your own list of text
 never to read aloud. You are asked to confirm first, and nothing is

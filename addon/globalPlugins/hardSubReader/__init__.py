@@ -103,6 +103,9 @@ def buildHelperCandidates():
         candidates.append(python + ["-u", SIDECAR])
     return candidates
 LOG_PATH = os.path.join(tempfile.gettempdir(), "hardSubReader_sidecar.log")
+# The log is started fresh once it passes this size, so detailed
+# logging cannot fill the drive if it is left switched on.
+MAX_LOG_BYTES = 5 * 1024 * 1024
 
 CREATE_NO_WINDOW = 0x08000000
 
@@ -124,6 +127,7 @@ RESETTABLE_DEFAULTS = {
     "interrupt": True,
     "ocrLanguage": "en",
     "onlyLanguage": False,
+    "detailedLog": False,
     "noiseFilterText": "",
     "noiseFilterBuiltins": "",
 }
@@ -135,6 +139,7 @@ config.conf.spec[CONF_SECTION] = {
     "interrupt": "boolean(default=True)",
     "ocrLanguage": "string(default='en')",
     "onlyLanguage": "boolean(default=False)",
+    "detailedLog": "boolean(default=False)",
     "preferredHelper": "string(default='')",
     "engineSetupOffered": "boolean(default=False)",
     "noiseFilterText": "string(default='')",
@@ -145,6 +150,9 @@ config.conf.spec[CONF_SECTION] = {
 # "rule" string is exactly what gets sent to the sidecar's NoiseFilter
 # (a "regex:" prefix means a regular expression; otherwise literal
 # text). Keep in sync with BUILTIN_NOISE_PATTERNS in the sidecar.
+# Built-in filter rules. This list is the single source of truth: the
+# selected rules are passed to the helper at start-up, so a rule changed
+# here takes effect without any matching change in the helper.
 BUILTIN_NOISE_CHOICES = [
     ("timestamps",
      # Translators: a built-in noise filter choice.
@@ -161,7 +169,10 @@ BUILTIN_NOISE_CHOICES = [
     ("no_real_words",
      # Translators: a built-in noise filter choice.
      _("Lines with no real words, such as misread icons or symbols"),
-     r"regex:^(?!.*[a-zA-Z\u0600-\u06FF\u0400-\u04FF]{3,}).*$"),
+     # Resolved inside the helper. Written as an expression this rule
+     # would have to list every alphabet by hand, which restricted it to
+     # three of them and removed subtitles in any other writing system.
+     "builtin:no_letters"),
 ]
 
 ENGINE_DIR = os.path.join(os.path.expanduser("~"), ".config", "oneocr")
@@ -350,6 +361,13 @@ class HardSubReaderSettingsPanel(SettingsPanel):
             helper.addItem(wx.StaticText(self, label=_(
                 "The high-accuracy engine is already set up.")))
 
+        # Translators: checkbox enabling detailed logging.
+        self.detailLogCtrl = helper.addItem(wx.CheckBox(self, label=_(
+            "Save a detailed diagnostic log. Records the subtitle "
+            "text that is recognised, for use when reporting a "
+            "problem")))
+        self.detailLogCtrl.SetValue(getConf("detailedLog"))
+
         # Translators: button that restores the default settings.
         self.resetBtn = wx.Button(self, label=_(
             "Restore default settings"))
@@ -377,6 +395,7 @@ class HardSubReaderSettingsPanel(SettingsPanel):
         self.interruptCtrl.SetValue(d["interrupt"])
         self.langCtrl.SetValue(d["ocrLanguage"])
         self.onlyLangCtrl.SetValue(d["onlyLanguage"])
+        self.detailLogCtrl.SetValue(d["detailedLog"])
         for _key, cb in self.builtinCtrls:
             cb.SetValue(False)
         self.noiseTextCtrl.SetValue(d["noiseFilterText"])
@@ -398,10 +417,10 @@ class HardSubReaderSettingsPanel(SettingsPanel):
             _plugin._runEngineSetup()
 
     def isValid(self):
-        # NVDA calls this before closing the settings dialog; returning
-        # False keeps the panel OPEN with the user's text intact, so a
-        # typo in a filter pattern can be fixed immediately instead of
-        # silently vanishing after the dialog closes.
+        # NVDA calls this before the settings dialog closes. Returning
+        # False keeps the panel open with the entered text intact, so a
+        # mistake in a filter pattern can be corrected straight away
+        # rather than being discarded when the dialog closes.
         customText = self.noiseTextCtrl.GetValue()
         badLines = []
         for lineNo, ln in enumerate(customText.splitlines(), 1):
@@ -439,6 +458,7 @@ class HardSubReaderSettingsPanel(SettingsPanel):
         c["interrupt"] = self.interruptCtrl.GetValue()
         c["ocrLanguage"] = self.langCtrl.GetValue().strip() or "en"
         c["onlyLanguage"] = self.onlyLangCtrl.GetValue()
+        c["detailedLog"] = self.detailLogCtrl.GetValue()
 
         checked = [key for key, cb in self.builtinCtrls if cb.GetValue()]
         c["noiseFilterBuiltins"] = ",".join(checked)
@@ -586,7 +606,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
     def _noiseFilterRules(self):
         rules = []
-        checked = set(getConf("noiseFilterBuiltins").split(","))
+        checked = getConf("noiseFilterBuiltins").split(",")
+        checked = {c.strip() for c in checked if c.strip()}
         for key, _label, rule in BUILTIN_NOISE_CHOICES:
             if key in checked:
                 rules.append(rule)
@@ -594,6 +615,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         if custom:
             rules.extend(ln for ln in custom.splitlines() if ln.strip())
         return rules
+
 
     def _sidecarArgs(self):
         args = [
@@ -605,6 +627,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         ]
         if getConf("onlyLanguage"):
             args += ["--only-lang"]
+        if getConf("detailedLog"):
+            args += ["--detailed-log"]
         args += [
             "--hwnd", str(self._lockHwnd or 0),
         ]
@@ -638,6 +662,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                     os.remove(LOG_PATH)
             except OSError:
                 pass
+            if (os.path.isfile(LOG_PATH)
+                    and os.path.getsize(LOG_PATH) > MAX_LOG_BYTES):
+                os.remove(LOG_PATH)
             logFile = open(LOG_PATH, "a", encoding="utf-8", errors="replace")
         except Exception:
             logFile = subprocess.DEVNULL
@@ -813,9 +840,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         queueHandler.queueFunction(queueHandler.eventQueue, ui.message, text)
 
     def _speakSubtitle(self, text, kind="line"):
-        # Only a genuinely NEW line may interrupt ongoing speech. A suffix
-        # (continuation of a line we already started reading) must queue,
-        # otherwise it would cut off the very line it continues.
+        # Only a new line may interrupt speech in progress. A suffix
+        # continues a line that is already being read, so it is queued;
+        # interrupting would cut off the line it continues.
         if getConf("interrupt") and kind == "line":
             def speakNow(t=text):
                 try:
