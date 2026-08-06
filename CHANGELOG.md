@@ -1,6 +1,9 @@
 # Changelog
 
 ## 1.3.0
+- Fixed settings having no effect: response speed, scanned area,
+  misread filtering and repeat time were ignored, and the add-on
+  always ran with its default values.
 - Added an option to read only subtitles in one language, for
   videos that mix languages. Type a language code such as ar, en
   or ja and tick "Read only subtitles in this language" to skip

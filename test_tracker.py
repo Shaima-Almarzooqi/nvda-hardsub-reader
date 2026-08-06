@@ -384,4 +384,23 @@ for junk in ["CHANNEL NAME", "STUDIO", "12:34", "S", "...",
 check("no shipped rule fails to compile", shipped.errors == [],
       shipped.errors)
 
+# 35. Every command-line setting must actually reach the helper.
+#     These are applied by parse_args, which the rest of the suite
+#     never calls, so a setting could be silently discarded while
+#     all other tests passed.
+_argv = sys.argv
+sys.argv = ["helper", "--interval", "0.8", "--region", "100",
+            "--stable", "3", "--window", "25", "--lang", "ar",
+            "--only-lang", "--detailed-log", "--hwnd", "1234"]
+try:
+    mod.parse_args()
+finally:
+    sys.argv = _argv
+for name, want in [("POLL_INTERVAL", 0.8), ("REGION_FRACTION", 1.0),
+                   ("STABLE_FRAMES", 3), ("REPEAT_WINDOW", 25.0),
+                   ("OCR_LANG", "ar"), ("LANG_FILTER_ON", True),
+                   ("DETAILED_LOG", True), ("LOCK_HWND", 1234)]:
+    check(f"setting {name} reaches the helper",
+          getattr(mod, name) == want, getattr(mod, name))
+
 print(f"\nAll {passed} tests passed against the real shipped module.")

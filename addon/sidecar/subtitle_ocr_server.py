@@ -1010,7 +1010,6 @@ def parse_args():
             rules = [ln for ln in blob.split("\n") if ln.strip()]
         except Exception:
             log("Could not decode --filters-b64; ignoring noise filters.")
-    return NoiseFilter(rules)
     POLL_INTERVAL = max(0.1, min(2.0, a.interval))
     REGION_FRACTION = max(0.10, min(1.0, a.region / 100.0))
     STABLE_FRAMES = max(1, min(5, a.stable))
@@ -1018,6 +1017,9 @@ def parse_args():
     OCR_LANG = a.lang
     LANG_FILTER_ON = a.only_lang
     DETAILED_LOG = a.detailed_log
+    # Must stay last: everything after a return is unreachable,
+    # and the settings above would silently never be applied.
+    return NoiseFilter(rules)
 
 
 def main():
