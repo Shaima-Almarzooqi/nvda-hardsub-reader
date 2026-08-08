@@ -275,6 +275,24 @@ def script_histogram(text):
     return counts
 
 
+def _letter_scripts(text):
+    """Return scripts for actual letters in *text*.
+
+    ``script_of`` deliberately uses broad Unicode blocks, some of which
+    also contain digits and punctuation. Word-level cleanup must not
+    mistake those characters for words, so it narrows the result with
+    ``isalpha`` first.
+    """
+    out = []
+    for ch in text:
+        if not ch.isalpha():
+            continue
+        script = script_of(ch)
+        if script:
+            out.append(script)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Same-script language hints.
 #
@@ -424,11 +442,14 @@ def _is_credible_language(text, lang):
 class LanguageFilter:
     """Optional single-language mode.
 
-    When a language code is set, only lines whose dominant script matches
-    that language are kept -- so an Arabic-subtitled video stops reading a
-    Latin channel logo or English credits. Lines with no letters at all
-    (numbers, symbols) are left alone for the noise filter to judge.
-    Unset/unknown code = keep everything, exactly as before.
+    When a language code is set, words in other scripts are removed before
+    a line reaches the tracker. This handles OCR joining credit text to a
+    subtitle: the credit disappears and changing credit text can no longer
+    make the subtitle look new. Languages sharing the selected script are
+    never stripped word by word; the conservative whole-line hint check
+    still handles those. Lines with no letters at all (numbers, symbols)
+    are left alone for the noise filter to judge. Unset/unknown code = keep
+    everything, exactly as before.
     """
 
     def __init__(self, code):
@@ -437,9 +458,81 @@ class LanguageFilter:
         self.primary = primary
         self.scripts = _LANG_SCRIPTS.get(primary)
         self.active = bool(self.scripts)
+        self.rewritten = []
         # A code was supplied but is not recognised. Remain inactive
         # rather than filtering everything, and let the caller report.
         self.unknown = bool(self.code) and not self.active
+
+    def _clean_word(self, word):
+        """Remove foreign-script letter runs from one OCR word.
+
+        OCR normally separates credits and subtitles with whitespace, but
+        it can glue the two scripts into one token. A word containing no
+        selected-script letters is dropped altogether. In a mixed word,
+        only foreign-script letters and an attached foreign prefix/suffix
+        are removed. Same-script words are untouched.
+        """
+        letters = []
+        for index, ch in enumerate(word):
+            if not ch.isalpha():
+                continue
+            script = script_of(ch)
+            if script:
+                letters.append((index, script))
+        if not letters:
+            return word
+
+        target_positions = [i for i, script in letters
+                            if script in self.scripts]
+        if not target_positions:
+            return ""
+        if all(script in self.scripts for _i, script in letters):
+            return word
+
+        first_target = target_positions[0]
+        last_target = target_positions[-1]
+        foreign_before = [i for i, script in letters
+                          if script not in self.scripts and i < first_target]
+        foreign_after = [i for i, script in letters
+                         if script not in self.scripts and i > last_target]
+        start = first_target if foreign_before else 0
+        end = (min(foreign_after) - 1
+               if foreign_after else len(word) - 1)
+
+        cleaned = []
+        for index in range(start, end + 1):
+            ch = word[index]
+            script = script_of(ch) if ch.isalpha() else None
+            if script and script not in self.scripts:
+                continue
+            cleaned.append(ch)
+        return "".join(cleaned)
+
+    def clean_line(self, line):
+        """Return tracker-ready text, or ``None`` when it should be dropped."""
+        if not self.active:
+            return line
+
+        original_scripts = _letter_scripts(line)
+        if not original_scripts:
+            return line          # no letters: not ours to judge
+
+        words = []
+        for word in line.split():
+            cleaned = self._clean_word(word)
+            if cleaned:
+                words.append(cleaned)
+        result = " ".join(words)
+
+        # The line contained letters, but stripping left no letters in the
+        # requested script. Drop the entire residue, including numbers or
+        # punctuation that happened to share the line.
+        if not any(script in self.scripts
+                   for script in _letter_scripts(result)):
+            return None
+        if self._wrong_same_script(result):
+            return None
+        return result
 
     def wrong_language(self, line):
         if not self.active:
@@ -481,8 +574,15 @@ class LanguageFilter:
 
     def filter_lines(self, lines):
         kept, dropped = [], []
+        self.rewritten = []
         for ln in lines:
-            (dropped if self.wrong_language(ln) else kept).append(ln)
+            cleaned = self.clean_line(ln)
+            if cleaned is None:
+                dropped.append(ln)
+                continue
+            kept.append(cleaned)
+            if cleaned != ln:
+                self.rewritten.append((ln, cleaned))
         return kept, dropped
 
 
@@ -761,11 +861,17 @@ class SubtitleTracker:
             matched_pending.discard(pk)
             bk = best.lower()
             m = self._find_spoken_match(bk, exclude=spoken_now)
-            if m is not None and (
-                    len(word_keys(best)) <= len(word_keys(self.spoken[m][1]))):
+            ext = self._extension_of(best)
+            if m is not None and ext is None:
+                # Close enough to a line already spoken, and not a
+                # word-level continuation of it, so this is another
+                # reading of the same line rather than new text.
+                # It may be longer than what was spoken: recognition
+                # can attach neighbouring on-screen text to a
+                # subtitle, which would otherwise cause the whole
+                # line to be read again each time that text changes.
                 self.spoken[m] = (now, self.spoken[m][1])
                 continue
-            ext = self._extension_of(best)
             if ext is not None:
                 sk, suffix = ext
                 del self.spoken[sk]
@@ -1164,6 +1270,9 @@ def main():
                          for ln in raw.split("\n") if ln.strip()]
                 lines, dropped = noise_filter.filter_lines(lines)
                 lines, wrong_lang = lang_filter.filter_lines(lines)
+                for original, cleaned in lang_filter.rewritten:
+                    detail("language filter removed other-script text: "
+                           "%r -> %r" % (original, cleaned))
                 for ln in wrong_lang:
                     log("Filtered as other language: %r" % ln)
                 for d in dropped:

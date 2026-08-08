@@ -467,4 +467,113 @@ for setting, listname in choice_lists.items():
     check(f"default for {setting} is an offered option",
           default in offered, f"default={default} offered={sorted(offered)}")
 
+# 40. Recognition sometimes attaches neighbouring on-screen text to a
+#     subtitle, and that attached text changes between scans. Each
+#     variant must not cause the whole line to be read again.
+tr = mod.SubtitleTracker(stable_frames=2)
+core = "the same subtitle line here"
+seq = [["ABC " + core], ["ABC " + core], [core], [core],
+       ["XY " + core + " ZW"], ["XY " + core + " ZW"],
+       ["QR " + core + " ST"], ["QR " + core + " ST"]]
+said = []
+_t = 0.0
+for _sc in seq:
+    said += [v for _k, v in tr.update(_sc, _t)]
+    _t += 0.3
+check("attached text varying between scans is read once",
+      sum(1 for v in said if core in v) == 1, said)
+
+# 41. A subtitle that genuinely grows must still speak only the
+#     newly revealed words.
+tr = mod.SubtitleTracker(stable_frames=2)
+said = []
+_t = 0.0
+for _sc in (["I can"], ["I can"], ["I can do that"], ["I can do that"]):
+    said += [(k, v) for k, v in tr.update(_sc, _t)]
+    _t += 0.3
+check("a growing line still speaks only the new part",
+      said == [("line", "I can"), ("suffix", "do that")], said)
+
+# 42. A genuinely different line is still spoken.
+tr = mod.SubtitleTracker(stable_frames=2)
+said = []
+_t = 0.0
+for _sc in (["first sentence"], ["first sentence"],
+            ["a completely different sentence"],
+            ["a completely different sentence"]):
+    said += [v for _k, v in tr.update(_sc, _t)]
+    _t += 0.3
+check("a different line is still spoken", len(said) == 2, said)
+
+# 43. Single-language mode strips words in a different script before
+#     the tracker sees them. It also handles OCR gluing the two scripts
+#     into one whitespace-delimited token, while preserving same-script
+#     names and the conservative same-script language check.
+ar_filter = mod.LanguageFilter("ar")
+arabic_core = "إن كنت مستعداً فأبدأ يا سيد محمد"
+word_level_cases = [
+    ("OZTAY. " + arabic_core, arabic_core),
+    ("iLTE وأنت ستنضمين إلى المراسم معي مساء \\LAN",
+     "وأنت ستنضمين إلى المراسم معي مساء"),
+    ("OGUZCAN Uصحيح، هل نبدأ يا سيد محمد؟ HAKAN BAYRAK",
+     "صحيح، هل نبدأ يا سيد محمد؟"),
+    ("MELiH ME الدفاع إحدى حقوق الإنسان الأساسيةN GURSES",
+     "الدفاع إحدى حقوق الإنسان الأساسية"),
+]
+for raw, want in word_level_cases:
+    kept, dropped = ar_filter.filter_lines([raw])
+    check(f"other-script words stripped from {raw[:18]!r}",
+          kept == [want] and dropped == [], (kept, dropped))
+
+kept, dropped = ar_filter.filter_lines(["CREDIT 12"])
+check("line reduced to no selected-script words is dropped",
+      kept == [] and dropped == ["CREDIT 12"], (kept, dropped))
+kept, dropped = ar_filter.filter_lines(["12:34"])
+check("letterless line remains for the noise filter",
+      kept == ["12:34"] and dropped == [], (kept, dropped))
+kept, dropped = ar_filter.filter_lines(["12:34 مرحبا بك"])
+check("neutral tokens beside selected-script text are preserved",
+      kept == ["12:34 مرحبا بك"] and dropped == [], (kept, dropped))
+
+english_with_names = "I met Ateş and Işıl at the café"
+kept, dropped = mod.LanguageFilter("en").filter_lines(
+    [english_with_names])
+check("same-script foreign names are not stripped word by word",
+      kept == [english_with_names] and dropped == [], (kept, dropped))
+turkish_filter = mod.LanguageFilter("tr")
+english_line = "The end of the story is that you have not"
+kept, dropped = turkish_filter.filter_lines([english_line])
+check("same-script rival language still uses whole-line hints",
+      kept == [] and dropped == [english_line], (kept, dropped))
+kept, dropped = mod.LanguageFilter("ja").filter_lines(
+    ["END 今日は元気です CREDIT"])
+check("word stripping works for multi-script target languages",
+      kept == ["今日は元気です"] and dropped == [], (kept, dropped))
+unknown_line = "Latin مرحبا"
+kept, dropped = mod.LanguageFilter("zz").filter_lines([unknown_line])
+check("unknown language remains completely inert",
+      kept == [unknown_line] and dropped == [], (kept, dropped))
+
+# Cleaning must happen before co-visibility and deduplication. A credit
+# first appears as its own line, then is repeatedly fused to the subtitle;
+# every scan reaching the tracker contains only the identical Arabic core.
+ar_filter = mod.LanguageFilter("ar")
+tr = mod.SubtitleTracker(stable_frames=2)
+raw_scans = [
+    ["İLTE", arabic_core],
+    ["İLTE", arabic_core],
+    ["XY " + arabic_core + " ZW"],
+    ["XY " + arabic_core + " ZW"],
+    ["QR" + arabic_core + " ST"],
+    ["QR" + arabic_core + " ST"],
+]
+said = []
+_t = 0.0
+for raw_lines in raw_scans:
+    clean_lines, _dropped = ar_filter.filter_lines(raw_lines)
+    said += [text for _kind, text in tr.update(clean_lines, _t)]
+    _t += 0.3
+check("cleaned fused credits reach the tracker as one subtitle",
+      said == [arabic_core], said)
+
 print(f"\nAll {passed} tests passed against the real shipped module.")
