@@ -121,7 +121,7 @@ CONF_SECTION = "hardSubReader"
 # architecture search, which are not user preferences.
 RESETTABLE_DEFAULTS = {
     "pollInterval": 0.3,
-    "regionPercent": 30,
+    "regionPercent": 33,
     "stableFrames": 2,
     "repeatWindow": 8,
     "interrupt": True,
@@ -133,7 +133,7 @@ RESETTABLE_DEFAULTS = {
 }
 config.conf.spec[CONF_SECTION] = {
     "pollInterval": "float(default=0.3, min=0.1, max=2.0)",
-    "regionPercent": "integer(default=30, min=10, max=100)",
+    "regionPercent": "integer(default=33, min=10, max=100)",
     "stableFrames": "integer(default=2, min=1, max=5)",
     "repeatWindow": "integer(default=8, min=2, max=60)",
     "interrupt": "boolean(default=True)",

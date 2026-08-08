@@ -50,7 +50,7 @@ faulthandler.enable(file=sys.stderr)
 # Defaults (overridable via CLI)
 # ---------------------------------------------------------------------------
 POLL_INTERVAL = 0.3
-REGION_FRACTION = 0.30
+REGION_FRACTION = 0.33   # matches the default offered in the settings
 STABLE_FRAMES = 2
 SIMILARITY_THRESHOLD = 0.85
 REPEAT_WINDOW = 8.0
@@ -102,6 +102,10 @@ PENDING_GRACE_SCANS = 1
 # least this many words, another language must reach this much
 # evidence, and must beat the chosen language by this margin.
 MIN_WORDS_FOR_LANG_HINT = 3
+# How many separate words must carry a language's distinctive
+# letters before those letters alone are treated as evidence about
+# the whole line. One or two such words are usually names.
+MIN_CHAR_WORDS = 3
 MIN_HINT_EVIDENCE = 2
 HINT_MARGIN = 2
 
@@ -311,7 +315,14 @@ _LANG_HINTS = {
     "fi": ("", "on ei ja se ett\u00e4 en n\u00e4in mutta kun niin voi"),
     "id": ("", "yang dan di ini itu tidak untuk dengan dari saya kamu ada"),
     "ms": ("", "yang dan di ini itu tidak untuk dengan dari saya awak ada"),
-    "vi": ("\u01b0\u01a1\u0111\u0103\u00e2\u00ea\u00f4",
+    "vi": ("\u01b0\u01a1\u0111\u0103\u00e2\u00ea\u00f4"
+           # tone-marked vowels, which carry most Vietnamese text
+           "\u1ea1\u1ea3\u1ea5\u1ea7\u1ea9\u1eab\u1ead\u1eaf"
+           "\u1eb1\u1eb3\u1eb5\u1eb7\u1eb9\u1ebb\u1ebd\u1ebf"
+           "\u1ec1\u1ec3\u1ec5\u1ec7\u1ec9\u1ecb\u1ecd\u1ecf"
+           "\u1ed1\u1ed3\u1ed5\u1ed7\u1ed9\u1edb\u1edd\u1edf"
+           "\u1ee1\u1ee3\u1ee5\u1ee7\u1ee9\u1eeb\u1eed\u1eef"
+           "\u1ef1\u1ef3\u1ef5\u1ef7\u1ef9",
            "khong la co cua toi nguoi va duoc mot nay cho"),
     "az": ("\u0259\u0131\u011f\u015f", "bir ve bu ile ucun amma deyil cox daha ne"),
     "hr": ("\u0111\u010d\u0107\u017e\u0161", "je ne se to na da li ali kako "
@@ -356,24 +367,58 @@ for _l in _LANG_HINTS:
         _HINT_RIVALS.setdefault(_sc[0], []).append(_l)
 
 
-def _hint_score(text, lang):
-    """Weak evidence that `text` is written in `lang`.
+def _hint_evidence(text, lang):
+    """Evidence that `text` is written in `lang`, as two separate counts.
 
-    Distinctive letters are weighted double, as a letter unique to one
-    language is stronger evidence than a single shared function word.
+    The two kinds of evidence behave very differently and must not be
+    added together blindly:
+
+    * Function words belong to a language's grammar. They appear in
+      sentences written in that language and essentially never inside a
+      sentence written in another one.
+    * Distinctive letters travel with individual words. Proper names,
+      place names and borrowed words carry them across language
+      boundaries all the time, so on their own they say little about
+      what language the line is written in.
+
+    Returned as (function-word hits, number of words carrying a
+    distinctive letter) so the caller can weigh them appropriately.
     """
     hint = _LANG_HINTS.get(lang)
     if not hint:
-        return 0
+        return 0, 0
     chars, words = hint
-    score = 0
-    lowered = text.lower()
-    if chars:
-        score += 2 * sum(1 for c in set(chars) if c in lowered)
     wordset = set(words.split())
-    if wordset:
-        score += sum(1 for w in word_keys(text) if w in wordset)
-    return score
+    keys = word_keys(text)
+    func_hits = sum(1 for w in keys if w in wordset)
+    char_words = 0
+    if chars:
+        charset = set(chars)
+        char_words = sum(1 for w in keys
+                         if any(c in charset for c in w))
+    return func_hits, char_words
+
+
+def _hint_score(text, lang):
+    """Combined weight of the evidence, used only for ranking."""
+    func_hits, char_words = _hint_evidence(text, lang)
+    return func_hits + 2 * char_words
+
+
+def _is_credible_language(text, lang):
+    """Whether the evidence is strong enough to conclude that a line is
+    written in `lang`, rather than merely containing a word from it.
+
+    Either the line uses that language's grammar, or its distinctive
+    letters are spread across enough of the line that they cannot be
+    explained by one or two names.
+    """
+    func_hits, char_words = _hint_evidence(text, lang)
+    if func_hits >= 1:
+        return True
+    total = len(word_keys(text))
+    return (char_words >= MIN_CHAR_WORDS
+            and char_words * 2 >= total)
 
 
 class LanguageFilter:
@@ -423,6 +468,12 @@ class LanguageFilter:
         best_other = 0
         for other in rivals:
             if other == self.primary:
+                continue
+            # A rival only counts if the line really is
+            # written in it. Without this, a single foreign
+            # name inside an otherwise ordinary line could
+            # outweigh the language actually being read.
+            if not _is_credible_language(line, other):
                 continue
             best_other = max(best_other, _hint_score(line, other))
         return (best_other >= MIN_HINT_EVIDENCE

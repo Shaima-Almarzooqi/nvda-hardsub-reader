@@ -403,4 +403,68 @@ for name, want in [("POLL_INTERVAL", 0.8), ("REGION_FRACTION", 1.0),
     check(f"setting {name} reaches the helper",
           getattr(mod, name) == want, getattr(mod, name))
 
+# 36. A name or borrowed word from another language must not cause a
+#     line to be treated as foreign. Names carry a language's
+#     distinctive letters across language boundaries; its grammar
+#     does not travel with them.
+names_kept = [
+    ("en", "I met Ate\u015f and I\u015f\u0131l at the station"),
+    ("en", "Ate\u015f and I\u015f\u0131l arrived"),
+    ("en", "Se\u00f1or Garc\u00eda is waiting outside"),
+    ("en", "We sat in the caf\u00e9 by the river"),
+    ("en", "Bj\u00f6rn and Astrid came from Malm\u00f6"),
+    ("de", "Ich habe Fran\u00e7ois und Chlo\u00e9 gestern gesehen"),
+    ("es", "Vimos a Fran\u00e7ois en el teatro anoche"),
+    ("fr", "Nous avons vu Bj\u00f6rn dans le jardin hier"),
+    ("tr", "Bug\u00fcn John ve Mary ile bulu\u015ftuk burada"),
+    ("pl", "Wczoraj widzia\u0142em Jos\u00e9 na dworcu"),
+]
+for code, line in names_kept:
+    check(f"foreign name kept under {code!r}: {line[:24]!r}",
+          not mod.LanguageFilter(code).wrong_language(line))
+
+# 37. Genuinely foreign lines must still be recognised, including
+#     languages carried mainly by their diacritics.
+foreign_dropped = [
+    ("en", "Bu bir sey degil ve daha cok var"),
+    ("en", "Das ist nicht ein gutes Ergebnis und mit"),
+    ("en", "El hombre que no come en la casa"),
+    ("en", "Nie jest to tak jak czy ale do"),
+    ("en", "Ch\u00e0o c\u00e1c b\u1ea1n \u0111\u1ebfn v\u1edbi "
+           "ch\u01b0\u01a1ng tr\u00ecnh"),
+    ("en", "P\u0159\u00edli\u0161 \u017elu\u0165ou\u010dk\u00fd "
+           "k\u016f\u0148 \u00fap\u011bl"),
+    ("tr", "The end of the story is that you have not"),
+]
+for code, line in foreign_dropped:
+    check(f"foreign line still skipped under {code!r}",
+          mod.LanguageFilter(code).wrong_language(line))
+
+# 38. Grammar counts as evidence on its own; scattered letters do
+#     not, unless they cover a large part of the line.
+check("function words alone are credible evidence",
+      mod._is_credible_language("bir ve bu ile daha", "tr"))
+check("one distinctive word alone is not",
+      not mod._is_credible_language(
+          "I met Ate\u015f at the station", "tr"))
+
+# 39. Every default must correspond to an option the settings panel
+#     actually offers. A default with no matching option is shown
+#     as the nearest one, and saving the page then changes a
+#     setting the user never touched.
+choice_lists = {
+    "regionPercent": "AREA_CHOICES",
+    "pollInterval": "SPEED_CHOICES",
+    "stableFrames": "FILTER_CHOICES",
+}
+for setting, listname in choice_lists.items():
+    block = re.search(listname + r" = \[(.*?)\n    \]",
+                      plugin_src, re.S).group(1)
+    offered = {v for v in re.findall(r"\),\s*([\d.]+)\)", block)}
+    default = re.search(
+        '"' + setting + r'": (?:")?(?:float|integer)?\(?'
+        r'(?:default=)?([\d.]+)', plugin_src).group(1)
+    check(f"default for {setting} is an offered option",
+          default in offered, f"default={default} offered={sorted(offered)}")
+
 print(f"\nAll {passed} tests passed against the real shipped module.")
