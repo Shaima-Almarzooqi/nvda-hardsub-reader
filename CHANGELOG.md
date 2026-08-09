@@ -14,6 +14,11 @@
 - Added a "Restore default settings" button to the settings panel.
 - Added an optional detailed diagnostic log, off by default, for use
   when reporting a problem.
+- Improved the filter for text in capital letters: it now uses the
+  subtitle language code to tell a cast name from a sentence, so
+  longer credit lines are skipped while capitalised dialogue is kept.
+- Fixed a subtitle being read again each time text beside it changed,
+  such as rolling credits recognised as part of the subtitle line.
 - Fixed the filter for short all-capitals text only working on
   unaccented Latin letters, so cast lists and logos written with
   accented or non-Latin capitals were still read aloud.

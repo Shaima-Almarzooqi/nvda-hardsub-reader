@@ -351,22 +351,6 @@ check("every user setting is resettable",
       == {"preferredHelper", "engineSetupOffered"},
       sorted(set(spec_defaults) - set(reset_values)))
 
-# 33. The rules the add-on sends must not remove short words or text
-#     in writing systems that use no Latin, Arabic or Cyrillic
-#     letters. Checked against the add-on source, not a copy.
-live = mod.NoiseFilter(list(BUILTIN_RULES.values()))
-for sample in ["\u0645\u0627 \u0647\u0648 \u061F",
-               "\u3053\u3093\u306b\u3061\u306f",
-               "\u0BB5\u0BA3\u0B95\u0BCD\u0B95\u0BAE\u0BCD",
-               "\uc548\ub155\ud558\uc138\uc694",
-               "\u0E2A\u0E27\u0E31\u0E2A\u0E14\u0E35",
-               "\u0393\u03b5\u03b9\u03ac \u03c3\u03bf\u03c5"]:
-    check(f"live rules keep {sample[:8]!r}", not live.is_noise(sample))
-
-check("live rules still remove non-dialogue text",
-      live.is_noise("CHANNEL NAME") and live.is_noise("12:34")
-      and live.is_noise("S"))
-
 # 33. The rules the add-on sends must keep dialogue and remove
 #     non-dialogue, in every writing system. These use the rules
 #     parsed from the add-on source, not a copy.
@@ -384,7 +368,7 @@ for junk in ["CHANNEL NAME", "STUDIO", "12:34", "S", "...",
 check("no shipped rule fails to compile", shipped.errors == [],
       shipped.errors)
 
-# 35. Every command-line setting must actually reach the helper.
+# 34. Every command-line setting must actually reach the helper.
 #     These are applied by parse_args, which the rest of the suite
 #     never calls, so a setting could be silently discarded while
 #     all other tests passed.
@@ -403,7 +387,7 @@ for name, want in [("POLL_INTERVAL", 0.8), ("REGION_FRACTION", 1.0),
     check(f"setting {name} reaches the helper",
           getattr(mod, name) == want, getattr(mod, name))
 
-# 36. A name or borrowed word from another language must not cause a
+# 35. A name or borrowed word from another language must not cause a
 #     line to be treated as foreign. Names carry a language's
 #     distinctive letters across language boundaries; its grammar
 #     does not travel with them.
@@ -423,7 +407,7 @@ for code, line in names_kept:
     check(f"foreign name kept under {code!r}: {line[:24]!r}",
           not mod.LanguageFilter(code).wrong_language(line))
 
-# 37. Genuinely foreign lines must still be recognised, including
+# 36. Genuinely foreign lines must still be recognised, including
 #     languages carried mainly by their diacritics.
 foreign_dropped = [
     ("en", "Bu bir sey degil ve daha cok var"),
@@ -440,7 +424,7 @@ for code, line in foreign_dropped:
     check(f"foreign line still skipped under {code!r}",
           mod.LanguageFilter(code).wrong_language(line))
 
-# 38. Grammar counts as evidence on its own; scattered letters do
+# 37. Grammar counts as evidence on its own; scattered letters do
 #     not, unless they cover a large part of the line.
 check("function words alone are credible evidence",
       mod._is_credible_language("bir ve bu ile daha", "tr"))
@@ -448,7 +432,7 @@ check("one distinctive word alone is not",
       not mod._is_credible_language(
           "I met Ate\u015f at the station", "tr"))
 
-# 39. Every default must correspond to an option the settings panel
+# 38. Every default must correspond to an option the settings panel
 #     actually offers. A default with no matching option is shown
 #     as the nearest one, and saving the page then changes a
 #     setting the user never touched.
@@ -467,7 +451,7 @@ for setting, listname in choice_lists.items():
     check(f"default for {setting} is an offered option",
           default in offered, f"default={default} offered={sorted(offered)}")
 
-# 40. Recognition sometimes attaches neighbouring on-screen text to a
+# 39. Recognition sometimes attaches neighbouring on-screen text to a
 #     subtitle, and that attached text changes between scans. Each
 #     variant must not cause the whole line to be read again.
 tr = mod.SubtitleTracker(stable_frames=2)
@@ -483,7 +467,7 @@ for _sc in seq:
 check("attached text varying between scans is read once",
       sum(1 for v in said if core in v) == 1, said)
 
-# 41. A subtitle that genuinely grows must still speak only the
+# 40. A subtitle that genuinely grows must still speak only the
 #     newly revealed words.
 tr = mod.SubtitleTracker(stable_frames=2)
 said = []
@@ -494,7 +478,7 @@ for _sc in (["I can"], ["I can"], ["I can do that"], ["I can do that"]):
 check("a growing line still speaks only the new part",
       said == [("line", "I can"), ("suffix", "do that")], said)
 
-# 42. A genuinely different line is still spoken.
+# 41. A genuinely different line is still spoken.
 tr = mod.SubtitleTracker(stable_frames=2)
 said = []
 _t = 0.0
@@ -505,7 +489,7 @@ for _sc in (["first sentence"], ["first sentence"],
     _t += 0.3
 check("a different line is still spoken", len(said) == 2, said)
 
-# 43. Single-language mode strips words in a different script before
+# 42. Single-language mode strips words in a different script before
 #     the tracker sees them. It also handles OCR gluing the two scripts
 #     into one whitespace-delimited token, while preserving same-script
 #     names and the conservative same-script language check.
@@ -574,7 +558,7 @@ for raw_lines in raw_scans:
 check("cleaned fused credits reach the tracker as one subtitle",
       said == [arabic_core], said)
 
-# 46. The short all-capitals rule must work in every alphabet that
+# 43. The short all-capitals rule must work in every alphabet that
 #     has capital letters, not only unaccented Latin.
 caps_removed = ["CHANNEL NAME", "STUDIO",
                 "\u00c9CRAN TITRE", "M\u00dcNCHEN",
@@ -586,7 +570,7 @@ for phrase in caps_removed:
     check(f"capitals removed regardless of alphabet: {phrase!r}",
           caps_filter.is_noise(phrase))
 
-# 47. Ordinary dialogue, and alphabets that have no capitals at
+# 44. Ordinary dialogue, and alphabets that have no capitals at
 #     all, must never be caught by that rule.
 caps_kept = ["Move aside, kids.", "Did you say so?", "Alexander",
              "wait for me now",
@@ -599,12 +583,12 @@ for phrase in caps_kept:
     check(f"dialogue kept by the capitals rule: {phrase!r}",
           not caps_filter.is_noise(phrase))
 
-# 48. Length limit unchanged: longer lines are not treated as
+# 45. Length limit unchanged: longer lines are not treated as
 #     on-screen labels even when fully capitalised.
 check("long capitalised lines are left alone",
       not mod.is_short_all_capitals("THIS LINE IS FAR TOO LONG"))
 
-# 49. With the subtitle language known, cast lists and headings are
+# 46. With the subtitle language known, cast lists and headings are
 #     recognised as labelling even when longer than the narrow
 #     limit, while sentences are protected by their everyday words.
 en_words = mod.everyday_words_for("en")
@@ -624,7 +608,7 @@ for phrase in ["STOP THE CAR", "I CAN DO IT", "OPEN THE DOOR",
 check("short capitalised exclamations behave as before",
       label_filter.is_noise("RUN") and mod.is_short_all_capitals("RUN"))
 
-# 50. Without a known language the narrow behaviour is unchanged,
+# 47. Without a known language the narrow behaviour is unchanged,
 #     so nothing new is removed for users of other languages.
 narrow = mod.NoiseFilter(list(BUILTIN_RULES.values()), set())
 check("unknown language keeps the narrow limit",
@@ -635,7 +619,7 @@ check("word list is empty for an unlisted language",
 check("word list is found for a listed language",
       len(mod.everyday_words_for("tr")) > 5)
 
-# 51. Several names are often recognised as a single line, and a
+# 48. Several names are often recognised as a single line, and a
 #     capital is sometimes read as a small letter. Neither should
 #     stop a line being recognised as on-screen labelling.
 multi = mod.NoiseFilter(list(BUILTIN_RULES.values()),
@@ -647,7 +631,7 @@ for phrase in ["FIRST NAME SECOND NAME THIRD NAME",
     check(f"joined or misread labelling removed: {phrase!r}",
           multi.is_noise(phrase))
 
-# 52. Ordinary sentences are still protected at the wider limits,
+# 49. Ordinary sentences are still protected at the wider limits,
 #     including longer ones and normal sentence case.
 for phrase in ["GET AWAY FROM THE DOOR NOW", "THIS IS NOT FOR YOU",
                "WHAT ARE YOU DOING", "Hello there",
@@ -658,7 +642,7 @@ check("a mostly lowercase line is never labelling",
       not mod.is_screen_label("this is ordinary dialogue",
                               mod.everyday_words_for("en")))
 
-# 53. Alphabets without capital letters must never be treated as
+# 50. Alphabets without capital letters must never be treated as
 #     on-screen labelling. They have no capitals and no small
 #     letters, so any test that only counts small letters would
 #     match all of them and silence the dialogue.
@@ -676,7 +660,7 @@ for code, line in caseless_samples:
     check(f"caseless script never labelled ({code})",
           not mod.is_screen_label(line, mod.everyday_words_for(code)))
 
-# 54. The same lines must survive the whole built-in filter set,
+# 51. The same lines must survive the whole built-in filter set,
 #     which is how they reach the tracker in practice.
 for code, line in caseless_samples:
     nf_case = mod.NoiseFilter(list(BUILTIN_RULES.values()),
@@ -684,7 +668,7 @@ for code, line in caseless_samples:
     check(f"caseless dialogue survives the filters ({code})",
           not nf_case.is_noise(line))
 
-# 55. Capitalised labelling is still recognised, so the guard did
+# 52. Capitalised labelling is still recognised, so the guard did
 #     not simply switch the rule off.
 lat = mod.NoiseFilter(list(BUILTIN_RULES.values()),
                       mod.everyday_words_for("en"))
