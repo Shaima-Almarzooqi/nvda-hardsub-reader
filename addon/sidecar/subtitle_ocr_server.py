@@ -688,7 +688,15 @@ def is_screen_label(text, everyday_words=()):
     letters = [c for c in stripped if c.isalpha()]
     if len(letters) < 2:
         return False
+    # Most letters must actually be capitals. Alphabets that have no
+    # capital letters, such as Arabic, Hebrew, Thai and the East
+    # Asian scripts, can never satisfy this and are therefore never
+    # treated as labelling. Counting only lowercase would match them
+    # all, because they have none of either.
+    uppercase = sum(1 for c in letters if c.isupper())
     lowercase = sum(1 for c in letters if c.islower())
+    if uppercase < (1 - MAX_LABEL_LOWERCASE) * len(letters):
+        return False
     if lowercase > MAX_LABEL_LOWERCASE * len(letters):
         return False
     words = [w.strip("&-.\u2013\u2014") for w in stripped.split()]

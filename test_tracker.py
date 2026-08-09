@@ -658,4 +658,39 @@ check("a mostly lowercase line is never labelling",
       not mod.is_screen_label("this is ordinary dialogue",
                               mod.everyday_words_for("en")))
 
+# 53. Alphabets without capital letters must never be treated as
+#     on-screen labelling. They have no capitals and no small
+#     letters, so any test that only counts small letters would
+#     match all of them and silence the dialogue.
+caseless_samples = [
+    ("ar", "\u0645\u0631\u062d\u0628\u0627 \u0628\u0643 \u064a\u0627 \u0635\u062f\u064a\u0642\u064a"),
+    ("ar", "\u0644\u0627 \u062a\u062a\u062d\u0631\u0643"),
+    ("he", "\u05e9\u05dc\u05d5\u05dd \u05d7\u05d1\u05e8"),
+    ("ja", "\u3053\u3093\u306b\u3061\u306f\u4eca\u65e5"),
+    ("th", "\u0E2A\u0E27\u0E31\u0E2A\u0E14\u0E35 \u0E04\u0E23\u0E31\u0E1A"),
+    ("ta", "\u0BB5\u0BA3\u0B95\u0BCD\u0B95\u0BAE\u0BCD"),
+    ("ko", "\uc548\ub155\ud558\uc138\uc694"),
+    ("hi", "\u0928\u092e\u0938\u094d\u0924\u0947"),
+]
+for code, line in caseless_samples:
+    check(f"caseless script never labelled ({code})",
+          not mod.is_screen_label(line, mod.everyday_words_for(code)))
+
+# 54. The same lines must survive the whole built-in filter set,
+#     which is how they reach the tracker in practice.
+for code, line in caseless_samples:
+    nf_case = mod.NoiseFilter(list(BUILTIN_RULES.values()),
+                              mod.everyday_words_for(code))
+    check(f"caseless dialogue survives the filters ({code})",
+          not nf_case.is_noise(line))
+
+# 55. Capitalised labelling is still recognised, so the guard did
+#     not simply switch the rule off.
+lat = mod.NoiseFilter(list(BUILTIN_RULES.values()),
+                      mod.everyday_words_for("en"))
+for phrase in ["FIRST NAME SECOND NAME", "STUDlO NORTH",
+               "\u00c9CRAN TITRE", "SOUND DEPARTMENT"]:
+    check(f"capitalised labelling still removed: {phrase!r}",
+          lat.is_noise(phrase))
+
 print(f"\nAll {passed} tests passed against the real shipped module.")
