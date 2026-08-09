@@ -651,6 +651,52 @@ def is_short_all_capitals(text, max_length=15):
     return all(c.isupper() for c in letters)
 
 
+# On-screen labels such as cast lists are written in capitals, but so is
+# shouted dialogue in some subtitles. These limits decide how much text
+# may still be treated as a label rather than a sentence.
+MAX_LABEL_WORDS = 4
+MAX_LABEL_LENGTH = 30
+
+
+def is_screen_label(text, everyday_words=()):
+    """True for a line that reads like on-screen labelling rather than
+    speech: cast and crew lists, department headings, station names.
+
+    Such lines are written in capitals, carry no sentence punctuation
+    and are short. Shouted dialogue shares the first two of those, so
+    the deciding test is the everyday words a sentence needs and a name
+    does not have. Those words are supplied by the caller for the
+    subtitle language, because a word that is ordinary in one language
+    can appear inside a name in another.
+
+    With no word list available this falls back to the narrower test,
+    which only ever looks at very short lines.
+    """
+    stripped = text.strip()
+    if not everyday_words:
+        return is_short_all_capitals(stripped)
+    if not 2 <= len(stripped) <= MAX_LABEL_LENGTH:
+        return False
+    if any(c in "!?,:;" for c in stripped):
+        return False
+    letters = [c for c in stripped if c.isalpha()]
+    if len(letters) < 2 or not all(c.isupper() for c in letters):
+        return False
+    words = [w.strip("&-.\u2013\u2014") for w in stripped.split()]
+    words = [w for w in words if w]
+    if not words or len(words) > MAX_LABEL_WORDS:
+        return False
+    return not any(w.lower() in everyday_words for w in words)
+
+
+def everyday_words_for(lang_code):
+    """The common short words of a language, used to tell a sentence
+    from a label. Empty when the language is not one we have words for."""
+    primary = (lang_code or "").replace("_", "-").split("-")[0].lower()
+    hint = _LANG_HINTS.get(primary)
+    return set(hint[1].split()) if hint else set()
+
+
 class NoiseFilter:
     """Lines the user never wants read: exact-text phrases and/or regex
     patterns. Matching is EXACT-LINE only (the whole recognized line must
@@ -664,7 +710,8 @@ class NoiseFilter:
     reported back via .errors so the caller can inform the user.
     """
 
-    def __init__(self, rules):
+    def __init__(self, rules, everyday_words=()):
+        self.everyday_words = set(everyday_words)
         self.errors = []       # (rule_text, error_message)
         self._literals = set()
         self._patterns = []    # compiled regex objects
@@ -700,7 +747,7 @@ class NoiseFilter:
         if "no_letters" in self._builtins and letter_count(text) < 2:
             return True
         if ("allcaps_short" in self._builtins
-                and is_short_all_capitals(text)):
+                and is_screen_label(text, self.everyday_words)):
             return True
         for pat in self._patterns:
             try:
@@ -1203,7 +1250,9 @@ def parse_args():
     DETAILED_LOG = a.detailed_log
     # Must stay last: everything after a return is unreachable,
     # and the settings above would silently never be applied.
-    return NoiseFilter(rules)
+    # The subtitle language decides which everyday words protect a
+    # line from being treated as on-screen labelling.
+    return NoiseFilter(rules, everyday_words_for(OCR_LANG))
 
 
 def main():

@@ -82,7 +82,15 @@ short one may still be read even if it is in another language. This
 is intentional, so that dialogue is never silenced by an uncertain
 guess.</li>
 
-<li><strong>Text to never read aloud</strong>: a checklist of common noise (bare timestamps, short ALL-CAPS watermarks, "Skip Ad" prompts, symbol-only misreads) plus a box for your own phrases, one per line. A typed phrase is filtered only when it exactly matches a whole subtitle line, so it will not accidentally remove dialogue that merely contains the same words. Starting a line with <code>regex:</code> uses a regular expression instead of literal text, for advanced patterns.</li>
+<li><strong>Text to never read aloud</strong>: a checklist of common noise (bare timestamps, text in capital letters in any alphabet, such as channel logos and cast lists, "Skip Ad" prompts, symbol-only misreads) plus a box for your own phrases, one per line. A typed phrase is filtered only when it exactly matches a whole subtitle line, so it will not accidentally remove dialogue that merely contains the same words. Starting a line with <code>regex:</code> uses a regular expression instead of literal text, for advanced patterns.</li>
+
+<li>The filter for capital letters uses the subtitle language code to
+tell a name from a sentence, so setting that code improves it even if
+you do not turn on reading a single language. Telling a cast name
+apart from a line of shouted dialogue is not always possible, since
+both are written in capitals, so a short capitalised line without
+common words may be skipped. Untick the option if that matters for
+what you are watching.</li>
 
 <li><strong>Save a detailed diagnostic log</strong>: off by default.
 When switched on, the add-on records what the recognition engine read,

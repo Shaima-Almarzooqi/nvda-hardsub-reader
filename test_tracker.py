@@ -143,10 +143,10 @@ check("rtl multi punct relocated",
       mod.fix_rtl_leading_punct("...\u061F" + ar) == ar + "...\u061F", None)
 
 # 15. NoiseFilter: exact-line-only plain text matching
-nf = mod.NoiseFilter(["Yapim: Ay Yapim", "Skip Ad"])
-check("plain exact-line match filtered", nf.is_noise("Yapim: Ay Yapim"))
+nf = mod.NoiseFilter(["Example Productions", "Skip Ad"])
+check("plain exact-line match filtered", nf.is_noise("Example Productions"))
 check("plain text substring NOT filtered (exact-line only)",
-      not nf.is_noise("Before Yapim: Ay Yapim after"))
+      not nf.is_noise("Before Example Productions after"))
 check("unrelated line not filtered", not nf.is_noise("Hello there."))
 check("case-insensitive plain match",
       nf.is_noise("skip ad"))
@@ -510,15 +510,13 @@ check("a different line is still spoken", len(said) == 2, said)
 #     into one whitespace-delimited token, while preserving same-script
 #     names and the conservative same-script language check.
 ar_filter = mod.LanguageFilter("ar")
-arabic_core = "إن كنت مستعداً فأبدأ يا سيد محمد"
+arabic_core = "\u0645\u0631\u062d\u0628\u0627 \u0628\u0643 \u064a\u0627 \u0635\u062f\u064a\u0642\u064a"
+second_core = "\u0643\u062a\u0627\u0628 \u062c\u062f\u064a\u062f \u0639\u0644\u0649 \u0627\u0644\u0637\u0627\u0648\u0644\u0629"
 word_level_cases = [
-    ("OZTAY. " + arabic_core, arabic_core),
-    ("iLTE وأنت ستنضمين إلى المراسم معي مساء \\LAN",
-     "وأنت ستنضمين إلى المراسم معي مساء"),
-    ("OGUZCAN Uصحيح، هل نبدأ يا سيد محمد؟ HAKAN BAYRAK",
-     "صحيح، هل نبدأ يا سيد محمد؟"),
-    ("MELiH ME الدفاع إحدى حقوق الإنسان الأساسيةN GURSES",
-     "الدفاع إحدى حقوق الإنسان الأساسية"),
+    ("STUDIO. " + arabic_core, arabic_core),
+    ("ABC " + second_core + " XYZ", second_core),
+    ("NORTH " + arabic_core + " WEST", arabic_core),
+    (second_core + " CREDIT", second_core),
 ]
 for raw, want in word_level_cases:
     kept, dropped = ar_filter.filter_lines([raw])
@@ -535,7 +533,7 @@ kept, dropped = ar_filter.filter_lines(["12:34 مرحبا بك"])
 check("neutral tokens beside selected-script text are preserved",
       kept == ["12:34 مرحبا بك"] and dropped == [], (kept, dropped))
 
-english_with_names = "I met Ateş and Işıl at the café"
+english_with_names = "I met Björn and Chloé at the café"
 kept, dropped = mod.LanguageFilter("en").filter_lines(
     [english_with_names])
 check("same-script foreign names are not stripped word by word",
@@ -560,8 +558,8 @@ check("unknown language remains completely inert",
 ar_filter = mod.LanguageFilter("ar")
 tr = mod.SubtitleTracker(stable_frames=2)
 raw_scans = [
-    ["İLTE", arabic_core],
-    ["İLTE", arabic_core],
+    ["ABCD", arabic_core],
+    ["ABCD", arabic_core],
     ["XY " + arabic_core + " ZW"],
     ["XY " + arabic_core + " ZW"],
     ["QR" + arabic_core + " ST"],
@@ -605,5 +603,36 @@ for phrase in caps_kept:
 #     on-screen labels even when fully capitalised.
 check("long capitalised lines are left alone",
       not mod.is_short_all_capitals("THIS LINE IS FAR TOO LONG"))
+
+# 49. With the subtitle language known, cast lists and headings are
+#     recognised as labelling even when longer than the narrow
+#     limit, while sentences are protected by their everyday words.
+en_words = mod.everyday_words_for("en")
+label_filter = mod.NoiseFilter(list(BUILTIN_RULES.values()), en_words)
+for phrase in ["\u00c9CRAN TITRE GENERAL", "M\u00dcNCHEN STUDIO NORD",
+               "PRODUCTION UNIT", "COSTUME DEPARTMENT",
+               "\u041c\u041e\u0421\u041a\u0412\u0410 \u0421\u0422\u0423\u0414\u0418\u042f"]:
+    check(f"labelling removed: {phrase!r}", label_filter.is_noise(phrase))
+# Sentences containing an everyday word are protected; the rule
+# cannot tell a short capitalised exclamation from a name, and
+# such lines were already removed before this change.
+for phrase in ["STOP THE CAR", "I CAN DO IT", "OPEN THE DOOR",
+               "WHAT ARE YOU DOING", "NO!",
+               "THIS IS NOT FOR YOU"]:
+    check(f"capitalised sentence kept: {phrase!r}",
+          not label_filter.is_noise(phrase))
+check("short capitalised exclamations behave as before",
+      label_filter.is_noise("RUN") and mod.is_short_all_capitals("RUN"))
+
+# 50. Without a known language the narrow behaviour is unchanged,
+#     so nothing new is removed for users of other languages.
+narrow = mod.NoiseFilter(list(BUILTIN_RULES.values()), set())
+check("unknown language keeps the narrow limit",
+      not narrow.is_noise("COSTUME DEPARTMENT")
+      and narrow.is_noise("STUDIO"))
+check("word list is empty for an unlisted language",
+      mod.everyday_words_for("zz") == set())
+check("word list is found for a listed language",
+      len(mod.everyday_words_for("tr")) > 5)
 
 print(f"\nAll {passed} tests passed against the real shipped module.")
