@@ -654,8 +654,14 @@ def is_short_all_capitals(text, max_length=15):
 # On-screen labels such as cast lists are written in capitals, but so is
 # shouted dialogue in some subtitles. These limits decide how much text
 # may still be treated as a label rather than a sentence.
-MAX_LABEL_WORDS = 4
-MAX_LABEL_LENGTH = 30
+# Several names are often recognised as one line, so the limits allow
+# for that. They are only a safety net: the deciding test is the
+# everyday words below, which a sentence has and a name does not.
+MAX_LABEL_WORDS = 6
+MAX_LABEL_LENGTH = 50
+# Recognition occasionally reads a capital as a small letter, which
+# would otherwise stop a line of capitals being recognised as one.
+MAX_LABEL_LOWERCASE = 0.2
 
 
 def is_screen_label(text, everyday_words=()):
@@ -680,7 +686,10 @@ def is_screen_label(text, everyday_words=()):
     if any(c in "!?,:;" for c in stripped):
         return False
     letters = [c for c in stripped if c.isalpha()]
-    if len(letters) < 2 or not all(c.isupper() for c in letters):
+    if len(letters) < 2:
+        return False
+    lowercase = sum(1 for c in letters if c.islower())
+    if lowercase > MAX_LABEL_LOWERCASE * len(letters):
         return False
     words = [w.strip("&-.\u2013\u2014") for w in stripped.split()]
     words = [w for w in words if w]

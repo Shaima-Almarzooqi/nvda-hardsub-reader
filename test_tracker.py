@@ -635,4 +635,27 @@ check("word list is empty for an unlisted language",
 check("word list is found for a listed language",
       len(mod.everyday_words_for("tr")) > 5)
 
+# 51. Several names are often recognised as a single line, and a
+#     capital is sometimes read as a small letter. Neither should
+#     stop a line being recognised as on-screen labelling.
+multi = mod.NoiseFilter(list(BUILTIN_RULES.values()),
+                        mod.everyday_words_for("en"))
+for phrase in ["FIRST NAME SECOND NAME THIRD NAME",
+               "\u00c9CRAN TITRE M\u00dcNCHEN \u00d6REBRO",
+               "ARt DEPARTMENT", "STUDlO NORTH",
+               "SOUND DEPARTMENT COSTUME DEPARTMENT"]:
+    check(f"joined or misread labelling removed: {phrase!r}",
+          multi.is_noise(phrase))
+
+# 52. Ordinary sentences are still protected at the wider limits,
+#     including longer ones and normal sentence case.
+for phrase in ["GET AWAY FROM THE DOOR NOW", "THIS IS NOT FOR YOU",
+               "WHAT ARE YOU DOING", "Hello there",
+               "Move aside, kids.", "STOP THE CAR"]:
+    check(f"sentence kept at the wider limits: {phrase!r}",
+          not multi.is_noise(phrase))
+check("a mostly lowercase line is never labelling",
+      not mod.is_screen_label("this is ordinary dialogue",
+                              mod.everyday_words_for("en")))
+
 print(f"\nAll {passed} tests passed against the real shipped module.")
