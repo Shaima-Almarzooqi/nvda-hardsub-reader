@@ -627,6 +627,30 @@ def fix_rtl_leading_punct(s):
     return rest + lead
 
 
+def is_short_all_capitals(text, max_length=15):
+    """True for short lines written entirely in capital letters.
+
+    Used for on-screen text such as channel logos, station names and
+    cast lists. Written in code rather than as an expression because a
+    pattern like [A-Z] only covers unaccented Latin, and would miss the
+    same text written with accented, Cyrillic, Greek or any other
+    capital letters.
+
+    Alphabets without upper and lower case, such as Arabic, Hebrew,
+    Thai and the East Asian scripts, have no capital letters at all and
+    are therefore never matched here.
+    """
+    stripped = text.strip()
+    if not 2 <= len(stripped) <= max_length:
+        return False
+    if not all(c.isalpha() or c.isspace() for c in stripped):
+        return False
+    letters = [c for c in stripped if c.isalpha()]
+    if len(letters) < 2:
+        return False
+    return all(c.isupper() for c in letters)
+
+
 class NoiseFilter:
     """Lines the user never wants read: exact-text phrases and/or regex
     patterns. Matching is EXACT-LINE only (the whole recognized line must
@@ -674,6 +698,9 @@ class NoiseFilter:
         if text.lower() in self._literals:
             return True
         if "no_letters" in self._builtins and letter_count(text) < 2:
+            return True
+        if ("allcaps_short" in self._builtins
+                and is_short_all_capitals(text)):
             return True
         for pat in self._patterns:
             try:

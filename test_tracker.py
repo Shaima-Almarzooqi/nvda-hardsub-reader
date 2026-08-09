@@ -576,4 +576,34 @@ for raw_lines in raw_scans:
 check("cleaned fused credits reach the tracker as one subtitle",
       said == [arabic_core], said)
 
+# 46. The short all-capitals rule must work in every alphabet that
+#     has capital letters, not only unaccented Latin.
+caps_removed = ["CHANNEL NAME", "STUDIO",
+                "\u00c9CRAN TITRE", "M\u00dcNCHEN",
+                "\u00d6REBRO",
+                "\u041c\u041e\u0421\u041a\u0412\u0410",
+                "\u0391\u0398\u0397\u039d\u0391"]
+caps_filter = mod.NoiseFilter(list(BUILTIN_RULES.values()))
+for phrase in caps_removed:
+    check(f"capitals removed regardless of alphabet: {phrase!r}",
+          caps_filter.is_noise(phrase))
+
+# 47. Ordinary dialogue, and alphabets that have no capitals at
+#     all, must never be caught by that rule.
+caps_kept = ["Move aside, kids.", "Did you say so?", "Alexander",
+             "wait for me now",
+             "\u0645\u0627 \u0647\u0648 \u061F",
+             "\u3053\u3093\u306b\u3061\u306f",
+             "\u0BB5\u0BA3\u0B95\u0BCD\u0B95\u0BAE\u0BCD",
+             "\u05e9\u05dc\u05d5\u05dd",
+             "\u0E2A\u0E27\u0E31\u0E2A\u0E14\u0E35"]
+for phrase in caps_kept:
+    check(f"dialogue kept by the capitals rule: {phrase!r}",
+          not caps_filter.is_noise(phrase))
+
+# 48. Length limit unchanged: longer lines are not treated as
+#     on-screen labels even when fully capitalised.
+check("long capitalised lines are left alone",
+      not mod.is_short_all_capitals("THIS LINE IS FAR TOO LONG"))
+
 print(f"\nAll {passed} tests passed against the real shipped module.")

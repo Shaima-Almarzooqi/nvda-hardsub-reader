@@ -14,6 +14,9 @@
 - Added a "Restore default settings" button to the settings panel.
 - Added an optional detailed diagnostic log, off by default, for use
   when reporting a problem.
+- Fixed the filter for short all-capitals text only working on
+  unaccented Latin letters, so cast lists and logos written with
+  accented or non-Latin capitals were still read aloud.
 - Fixed the built-in filters removing ordinary dialogue, short
   words, and any subtitle written in an alphabet other than
   Latin, Arabic or Cyrillic.

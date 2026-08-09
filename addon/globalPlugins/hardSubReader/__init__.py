@@ -161,7 +161,10 @@ BUILTIN_NOISE_CHOICES = [
     ("allcaps_short",
      # Translators: a built-in noise filter choice.
      _("Short all-capitals text, such as channel logos or watermarks"),
-     r"regex:^[A-Z\s]{2,15}$"),
+     # Resolved inside the helper. As an expression this rule could
+     # only list unaccented Latin capitals, so the same text written
+     # with accented or non-Latin capitals was not recognised.
+     "builtin:allcaps_short"),
     ("skip_ad",
      # Translators: a built-in noise filter choice.
      _("Ad-skip prompts, such as 'Skip Ad'"),
