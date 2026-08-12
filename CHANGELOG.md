@@ -1,9 +1,8 @@
 # Changelog
 
 ## 1.3.0
-- Fixed settings having no effect: response speed, scanned area,
-  misread filtering and repeat time were ignored, and the add-on
-  always ran with its default values.
+- Fixed several settings not taking effect, so the add-on now uses the
+  options you choose rather than its default values.
 - Added an option to read only subtitles in one language, for
   videos that mix languages. Type a language code such as ar, en
   or ja and tick "Read only subtitles in this language" to skip
@@ -19,12 +18,8 @@
   longer credit lines are skipped while capitalised dialogue is kept.
 - Fixed a subtitle being read again each time text beside it changed,
   such as rolling credits recognised as part of the subtitle line.
-- Fixed the filter for short all-capitals text only working on
-  unaccented Latin letters, so cast lists and logos written with
-  accented or non-Latin capitals were still read aloud.
-- Fixed the built-in filters removing ordinary dialogue, short
-  words, and any subtitle written in an alphabet other than
-  Latin, Arabic or Cyrillic.
+- Fixed the filters removing ordinary dialogue and short words, and
+  removing subtitles written in some languages.
 
 ## 1.2.0
 - Added noise filtering: a list of phrases or patterns that are never

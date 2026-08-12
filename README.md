@@ -39,6 +39,10 @@ intended for investigating a problem.
   Gestures dialog.
 - Settings live under NVDA menu → Preferences → Settings → **HardSub
   Reader**, and full documentation is bundled with the add-on's help.
+- For the best results, tick all the options under **Text to never
+  read aloud** and enter your subtitle language code. Together these
+  keep station logos, cast lists, timestamps and text in other
+  languages from being read out with the dialogue.
 
 ## About this project
 

@@ -42,6 +42,12 @@ while the video window is completely covered by another window.</li>
 dialog under the HardSub Reader category.</p>
 
 <h2>Settings</h2>
+
+<p>For the best results, tick all the options under "Text to never
+read aloud" and enter your subtitle language code. Together these
+keep station logos, cast lists, timestamps and text in other
+languages from being read out with the dialogue. Each option can be
+unticked again if it removes something you wanted to hear.</p>
 <p>NVDA menu, Preferences, Settings, HardSub Reader:</p>
 <ul>
 <li><strong>Response speed</strong>: how quickly new subtitles are
@@ -97,8 +103,9 @@ When switched on, the add-on records what the recognition engine read,
 what it decided to speak, and what it skipped, in
 <code>%TEMP%\hardSubReader_sidecar.log</code>. This includes the text
 of the subtitles themselves, so leave it off unless you are
-investigating a problem or preparing a bug report. The file is started
-again once it grows past a few megabytes.</li>
+investigating a problem or preparing a bug report. The file is deleted and
+started again once it reaches 5 MB, so earlier entries are not
+kept.</li>
 
 <li><strong>Restore default settings</strong>: returns every setting on
 this page to how it arrived, including clearing your own list of text

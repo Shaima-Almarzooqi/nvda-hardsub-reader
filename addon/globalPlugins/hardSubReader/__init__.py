@@ -103,8 +103,8 @@ def buildHelperCandidates():
         candidates.append(python + ["-u", SIDECAR])
     return candidates
 LOG_PATH = os.path.join(tempfile.gettempdir(), "hardSubReader_sidecar.log")
-# The log is started fresh once it passes this size, so detailed
-# logging cannot fill the drive if it is left switched on.
+# The log is deleted and started again once it passes this size, so
+# detailed logging cannot fill the drive if it is left switched on.
 MAX_LOG_BYTES = 5 * 1024 * 1024
 
 CREATE_NO_WINDOW = 0x08000000
@@ -656,15 +656,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                 "fallback mode."))
             return False
         try:
-            # Keep the diagnostic log from growing forever: if it has
-            # passed 1 MB, start it fresh. It only ever contains
-            # timestamps and error details -- never subtitle text or
-            # screen content.
-            try:
-                if os.path.getsize(LOG_PATH) > 1_000_000:
-                    os.remove(LOG_PATH)
-            except OSError:
-                pass
+            # Delete the log once it passes MAX_LOG_BYTES so it
+            # cannot grow without limit. Checked here, when reading
+            # starts, so a single long session can exceed it.
             if (os.path.isfile(LOG_PATH)
                     and os.path.getsize(LOG_PATH) > MAX_LOG_BYTES):
                 os.remove(LOG_PATH)
